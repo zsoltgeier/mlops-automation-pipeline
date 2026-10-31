@@ -1,0 +1,5 @@
+outs:
+- md5: f164e0b4ebb8bc7513c47b97bca215af
+  size: 94933
+  hash: md5
+  path: garments_worker_productivity.csv

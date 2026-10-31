@@ -39,3 +39,24 @@ conda activate ./.conda/envs/mlops
 python -m pip install -r requirements.txt
 python -m pip install --no-build-isolation --no-deps -e .
 ```
+
+## Dataset és verziókezelés
+
+Forrás: [UCI Productivity Prediction of Garment Employees](https://archive.ics.uci.edu/dataset/597/productivity+prediction+of+garment+employees),
+[DOI: 10.24432/C51S6D](https://doi.org/10.24432/C51S6D). A mellékelt leírás szerint CC BY 4.0 licencű.
+1197 rekord, 15 oszlop, 59 nap, 2015-01-01 és 2015-03-11 között.
+Az `actual_productivity` regressziós célváltozó. A `wip` 506 helyen hiányzik;
+a 37 darab 1 fölötti célértéket és a tört létszámokat megőrizzük.
+
+A nyers CSV és az eredeti dataset-leíró PDF DVC-verziókezelésben van. Gitbe csak a `.dvc`
+pointerfájlok kerülnek. A kezdeti remote a Gitből kizárt `.dvc-remote/` helyi könyvtár.
+
+```bash
+dvc pull
+dvc push
+dvc status
+```
+
+Új klónba a helyi remote nem érkezik meg: a kapott forrásadatokat be kell másolni, vagy közös,
+hozzáférhető DVC remote-ot kell beállítani. A fejlesztői gépen a DVC belső cache helye a lokális,
+Gitből kizárt konfigurációban `.cache/dvc`; más gépen a DVC alapértelmezése használható.
