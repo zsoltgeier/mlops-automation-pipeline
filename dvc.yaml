@@ -1,0 +1,15 @@
+stages:
+  prepare:
+    cmd: garments-prepare
+    deps:
+      - data/garments_worker_productivity.csv
+      - src/garments_mlops/data.py
+      - src/garments_mlops/splitting.py
+      - src/garments_mlops/preprocessing.py
+      - src/garments_mlops/prepare.py
+      - pyproject.toml
+      - requirements.txt
+    params:
+      - data
+    outs:
+      - data/processed
