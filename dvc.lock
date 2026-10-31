@@ -9,12 +9,12 @@ stages:
       size: 94933
     - path: pyproject.toml
       hash: md5
-      md5: 670eede81b1096613716aae63a43d55a
-      size: 971
+      md5: f0294e6491a5688761875153dc5c5cd6
+      size: 1207
     - path: requirements.txt
       hash: md5
-      md5: 40410391814b2a4e04c4a2181a8a3874
-      size: 2145
+      md5: fdb855a17550560e58352ea3d3a0e720
+      size: 3042
     - path: src/garments_mlops/data.py
       hash: md5
       md5: b7cbe7d18516b47f4f6b2d8c23d23456

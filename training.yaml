@@ -1,0 +1,12 @@
+tracking_uri: sqlite:///runtime/mlflow.db
+artifact_dir: runtime/artifacts
+data_dir: data/processed
+experiment_name: garment-productivity-training
+model_name: garment-productivity
+minimum_improvement: 0.0
+lock_path: runtime/training.lock
+lock_timeout: 30.0
+random_seed: 42
+n_estimators: 100
+max_depth: 8
+min_samples_leaf: 3

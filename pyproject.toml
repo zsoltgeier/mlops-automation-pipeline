@@ -11,6 +11,7 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 garments-prepare = "garments_mlops.prepare:main"
+garments-train = "garments_mlops.train_cli:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
@@ -21,7 +22,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-config --strict-markers"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # MLflow imports an unrelated ResponsesAgent Any schema while saving sklearn models.
+    "ignore:.*Any type hint is inferred as AnyType.*:UserWarning:mlflow.types.type_hints",
+]
 
 [tool.coverage.run]
 source = ["src", "tests"]
