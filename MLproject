@@ -1,0 +1,12 @@
+name: garment-productivity
+conda_env: environment.yml
+entry_points:
+  prepare:
+    parameters:
+      parameters: {type: path, default: params.yaml}
+    command: "garments-prepare --parameters {parameters}"
+  train:
+    parameters:
+      config: {type: path, default: training.yaml}
+      model: {type: string, default: random_forest}
+    command: "garments-train --config {config} --model {model}"
