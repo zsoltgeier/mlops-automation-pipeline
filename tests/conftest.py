@@ -1,5 +1,7 @@
 """Small synthetic records with realistic garment feature types."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,3 +28,11 @@ def records() -> pd.DataFrame:
         "no_of_workers": [30.5] * 20,
         "actual_productivity": np.linspace(0.4, 1.12, 20),
     })
+
+
+@pytest.fixture
+def parameters(tmp_path: Path) -> Path:
+    """Write the explicit data preparation configuration."""
+    path = tmp_path / "params.yaml"
+    path.write_text("data:\n  train_fraction: 0.6\n  validation_fraction: 0.2\n  random_seed: 42\n")
+    return path

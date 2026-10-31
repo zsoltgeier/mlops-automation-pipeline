@@ -9,6 +9,9 @@ description = "Reproducible garment productivity MLOps workflows"
 requires-python = ">=3.11,<3.12"
 dynamic = ["dependencies"]
 
+[project.scripts]
+garments-prepare = "garments_mlops.prepare:main"
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
 
