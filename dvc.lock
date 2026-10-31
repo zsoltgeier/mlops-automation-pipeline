@@ -1,0 +1,45 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: garments-prepare
+    deps:
+    - path: data/garments_worker_productivity.csv
+      hash: md5
+      md5: f164e0b4ebb8bc7513c47b97bca215af
+      size: 94933
+    - path: pyproject.toml
+      hash: md5
+      md5: 670eede81b1096613716aae63a43d55a
+      size: 971
+    - path: requirements.txt
+      hash: md5
+      md5: 40410391814b2a4e04c4a2181a8a3874
+      size: 2145
+    - path: src/garments_mlops/data.py
+      hash: md5
+      md5: b7cbe7d18516b47f4f6b2d8c23d23456
+      size: 3239
+    - path: src/garments_mlops/prepare.py
+      hash: md5
+      md5: 4e6520f09a6cd223dd4763b827328760
+      size: 4713
+    - path: src/garments_mlops/preprocessing.py
+      hash: md5
+      md5: 13f4ee928eb09d69b589a9b1fb0c2c8c
+      size: 2069
+    - path: src/garments_mlops/splitting.py
+      hash: md5
+      md5: 1e1bcb502a63939dfbd1c81fb531fa53
+      size: 2550
+    params:
+      params.yaml:
+        data:
+          train_fraction: 0.6
+          validation_fraction: 0.2
+          random_seed: 42
+    outs:
+    - path: data/processed
+      hash: md5
+      md5: a92c691f5bdaec66215e8d122e81806d.dir
+      size: 1124641
+      nfiles: 11
