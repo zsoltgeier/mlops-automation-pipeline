@@ -3,11 +3,15 @@
 from dataclasses import replace
 import json
 from pathlib import Path
+import os
+import subprocess
+import sys
 from unittest.mock import Mock
 
 from filelock import FileLock, Timeout
 import mlflow.sklearn as mlflow_sklearn
 from mlflow.models import get_model_info
+from mlflow.exceptions import MlflowException
 import numpy as np
 import pandas as pd
 import pytest
@@ -116,3 +120,50 @@ def test_failed_artifact_registration_does_not_change_champion(
     assert str(active.version) == initial.model_version
     runs = client.search_runs([client.get_experiment_by_name(training_config.experiment_name).experiment_id])
     assert any(run.info.status == "FAILED" for run in runs)
+
+
+@pytest.mark.parametrize("failure", ["artifact_storage", "alias_update"])
+def test_backend_failure_cannot_activate_a_candidate(
+    training_config: TrainingConfig, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    initial = train_candidate(training_config, "baseline")
+    client = tracking_client(training_config)
+    if failure == "artifact_storage":
+        monkeypatch.setattr(mlflow_sklearn, "log_model", Mock(side_effect=OSError("artifact storage unavailable")))
+        error = OSError
+    else:
+        monkeypatch.setattr(type(client), "set_registered_model_alias",
+                            Mock(side_effect=MlflowException("alias update denied", error_code="PERMISSION_DENIED")))
+        error = MlflowException
+    with pytest.raises(error):
+        train_candidate(training_config, "random_forest")
+    active = client.get_model_version_by_alias(training_config.model_name, "champion")
+    assert str(active.version) == initial.model_version
+    runs = client.search_runs([client.get_experiment_by_name(training_config.experiment_name).experiment_id])
+    assert any(run.info.status == "FAILED" for run in runs)
+
+
+def test_model_loads_from_its_packaged_code_in_a_fresh_process(training_config: TrainingConfig, tmp_path: Path) -> None:
+    result = train_candidate(training_config, "random_forest")
+    program = """
+import json
+import sys
+import mlflow
+import mlflow.sklearn as store
+import pandas as pd
+mlflow.set_tracking_uri(sys.argv[1])
+mlflow.set_registry_uri(sys.argv[1])
+model = store.load_model(sys.argv[2])
+import garments_mlops.preprocessing as preprocessing
+features = pd.read_csv(sys.argv[3])[json.loads(sys.argv[4])]
+print(json.dumps({'prediction': model.predict(features).tolist(), 'code': preprocessing.__file__}))
+"""
+    process = subprocess.run([
+        sys.executable, "-I", "-c", program, training_config.tracking_uri,
+        f"models:/{training_config.model_name}/{result.model_version}",
+        str(training_config.data_dir / "validation.csv"), json.dumps(RAW_FEATURES),
+    ], cwd=tmp_path, env=dict(os.environ), capture_output=True, text=True, timeout=60, check=True)
+    restored = json.loads(process.stdout)
+    assert "code/garments_mlops/preprocessing.py" in Path(restored["code"]).as_posix()
+    features = pd.read_csv(training_config.data_dir / "validation.csv")[RAW_FEATURES]
+    assert_allclose(restored["prediction"], load_champion(training_config).model.predict(features))
