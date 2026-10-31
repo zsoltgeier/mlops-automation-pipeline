@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.conda/envs/mlops/bin/python",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+  "python.analysis.typeCheckingMode": "strict",
+  "files.watcherExclude": {"**/.conda/**": true, "**/.dvc/cache/**": true}
+}
