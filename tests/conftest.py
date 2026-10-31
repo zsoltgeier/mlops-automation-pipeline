@@ -1,10 +1,14 @@
 """Small synthetic records with realistic garment feature types."""
 
 from pathlib import Path
+import os
 
 import numpy as np
 import pandas as pd
 import pytest
+
+os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
+os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
 
 @pytest.fixture
