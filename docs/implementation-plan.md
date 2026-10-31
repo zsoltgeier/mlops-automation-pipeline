@@ -4,10 +4,13 @@ Az elsődleges követelményforrás a [feladatkiírás](assignment.md). A fejles
 [implementációs útmutató](implementation-guidelines.md) hat fázisában halad, fázisonkénti
 ellenőrzéssel. A következő fázis csak külön felhasználói kérésre indul.
 
+Az 1–2. fázis elkészült. A jelenlegi rendszer DVC-adatelőkészítést és MLflow-alapú, tesztelt
+modell-életciklust biztosít; a következő feladat a REST API és a Docker Compose integrációja.
+
 ## Adatok és szakmai döntések
 
 - Dataset: UCI Productivity Prediction of Garment Employees, 1197 sor és 15 oszlop.
-- Célváltozó: `actual_productivity`; regresszió. Elsődleges későbbi KPI: MAE, kisebb érték a jobb.
+- Célváltozó: `actual_productivity`; regresszió. Elsődleges KPI: MAE, kisebb érték a jobb.
 - Megfigyelési időszak: 2015-01-01 – 2015-03-11, 59 különböző nap.
 - A `wip` 506 értéke hiányzik. A részlegnevek szóközöket és `sweing` elírást tartalmaznak.
 - A 37 darab 1 fölötti célérték és a tört létszámok megmaradnak; ezek nem bizonyított adathibák.

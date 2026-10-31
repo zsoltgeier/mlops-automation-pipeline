@@ -3,8 +3,8 @@
 Az UCI Garment Productivity dataset `actual_productivity` célváltozójának becslése regresszióval.
 A cél reprodukálható adatfeldolgozás és egy automatizált, tesztelt MLOps rendszer felépítése.
 
-Elkészült az **1. fázis: fejlesztői környezet, DVC és preprocessing**.
-MLflow, REST API, Docker Compose, Evidently/Streamlit, CI és Airflow a későbbi fázisokban készülnek.
+Elkészült az **1–2. fázis: adatelőkészítés és MLflow modell-életciklus**.
+REST API, Docker Compose, Evidently/Streamlit, CI és Airflow a későbbi fázisokban készülnek.
 
 A teljes terv és a követelmények megfeleltetése a [megvalósítási tervben](docs/implementation-plan.md)
 olvasható. Az elsődleges követelményforrás a [feladatkiírás](docs/assignment.md), a fázisok rendjét
@@ -81,8 +81,8 @@ garments-prepare
 garments-prepare --source data/garments_worker_productivity.csv --output /tmp/garments-check --parameters params.yaml
 ```
 
-A `params.yaml` állítja a teljes napokra számított train és validation arányt, valamint a későbbi
-tanításhoz használt 42-es random seedet. A felosztás nem véletlen; az azonos napon megfigyelt
+A `params.yaml` állítja a teljes napokra számított train és validation arányt és az adatelőkészítés
+konfigurációjában rögzített seedet. A felosztás nem véletlen; az azonos napon megfigyelt
 munkacsoportok egy halmazban maradnak. A test adatok nem vehetnek részt modellválasztásban.
 
 | Halmaz | Napok | Sorok | Időintervallum |
@@ -114,6 +114,79 @@ tisztítást és transzformációt alkalmazza. A `joblib` artifact csak megbízh
 A 37 numerikus jellemzőt a train adatok határozzák meg. A `metadata.json` az összes többi kimenet
 hash-ét tartalmazza; a DVC lock rögzíti a kódot, környezetet, konfigurációt és a teljes eredménykönyvtárat.
 
+## Tanítás, MLflow és Model Registry
+
+A tanítás a `train.csv`, `validation.csv` és `metadata.json` fájlokat használja. Ellenőrzi a tartalmi
+hash-eket, a sémát és az időbeli szétválasztást; a végső `test.csv` fájlt nem olvassa be.
+A teljes preprocessing és regresszor egyetlen sklearn Pipeline-ként kerül MLflow-ba.
+
+Az aktivált környezetben, a `dvc repro` után:
+
+```bash
+export MLFLOW_DISABLE_TELEMETRY=true
+export MLFLOW_DISABLE_AGENT_HINT=1
+garments-train --model baseline
+garments-train --model random_forest
+garments-train --model baseline
+```
+
+A baseline `DummyRegressor` a train targetátlagát adja vissza. A challenger Random Forest,
+alapértelmezetten 100 fával, 8-as maximális mélységgel és 3-as minimális levélmérettel.
+A `training.yaml` állítja a tanítás tényleges random seedjét (42), a hiperparamétereket, az
+MLflow backendjét, a kísérlet- és modellneveket, valamint a promóciós küszöböt.
+
+A CLI JSON válasza tartalmazza a run ID-t, az új modellverziót, az aktív champion verzióját,
+a validációs MAE/RMSE/R² értékeket és a döntés indokát. Minden jelölt külön Registry-verziót kap,
+az elutasított modell is visszakereshető marad.
+
+Az első sikeres jelölt automatikusan champion lesz. Később az aktuális championt ugyanazon
+validációs adaton újraértékeljük. Promóció akkor történik, ha a jelölt MAE-je szigorúan kisebb,
+és a javulás legalább `minimum_improvement` nagyságú. A küszöb abszolút MAE-különbség;
+azonos eredmény esetén az alias nem változik.
+
+```bash
+garments-train --model random_forest --minimum-improvement 0.005
+garments-train --config training.yaml --tracking-uri http://127.0.0.1:5000
+```
+
+A `champion` Registry-alias az aktív verzió hiteles forrása. A `load_champion()` minden híváskor
+feloldja, majd a kiválasztott verziószámhoz kötve tölti be a modellt; nincs újraindítást igénylő cache.
+A közös fájlzár sorosítja a tanításokat és a promóciót. Minden írónak ugyanazt a backend-, modellnév-
+és zárkonfigurációt kell használnia. Az adat-előkészítést a tanítás előtt kell befejezni.
+
+Az MLflow rögzíti a paramétereket, train és validation metrikákat, input dataset-referenciákat,
+teljes forráshash-eket, inputpéldát és modell-signature-t. Artifactként elérhetők a provenance,
+a validációs predikciók és a promóciós döntés. A `promotion_approved` tag a minőségi kapu döntése;
+az aktiválást a tényleges alias és a sikeresen befejezett futás igazolja. Tárolási vagy Registry-hiba
+esetén a futás `FAILED`, és nem tér vissza sikeres tanítási eredmény.
+
+A modelleket `skops` formátumban mentjük, a saját `FeatureCleaner`, a `numpy.dtype` és a saját
+erdő által létrehozott `sklearn.tree._tree.Tree` típusok explicit engedélyezésével. A szükséges
+saját kód a modell artifactjába kerül. A Registry és az artifacttároló csak megbízható forrás lehet.
+
+Az MLflow metadata-adatbázisa `runtime/mlflow.db`, artifactjai a `runtime/artifacts/` alatt vannak.
+Az ismételt futások megőrzik a korábbi kísérleteket és verziókat. A `runtime/` Gitből kizárt,
+ezért klónozáskor nem másolódik át; a modelleket tanítással lehet előállítani. A közös tárolást
+és Docker volume-okat a következő fázis adja hozzá.
+
+Az MLflow felülete ugyanazt az adatbázist használja:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///runtime/mlflow.db --host 127.0.0.1 --port 5000 --workers 1
+```
+
+Elérés: [http://127.0.0.1:5000](http://127.0.0.1:5000). Az Experiments és Models nézetben látszanak
+a futások, artifactok, modellverziók és a champion alias.
+
+Az `MLproject` adatelőkészítő és tanító belépési pontot is tartalmaz. A tanító entrypoint kipróbált futtatása:
+
+```bash
+MLFLOW_TRACKING_URI=sqlite:///runtime/mlflow.db mlflow run . --env-manager=local --experiment-name garment-productivity-training -e train -P model=random_forest
+```
+
+A validációs kapu az automatikus modellcsere minőségét védi. Jövőbeli vagy eltérő eloszlású adatokon
+nem garantál változatlan predikciós teljesítményt. A drift monitoring külön folyamat marad.
+
 ## Minőségellenőrzés
 
 Az aktivált környezetben `make quality`, vagy külön-külön:
@@ -129,9 +202,12 @@ python -m pip check
 ```
 
 Az src és a tesztkód külön küszöböt kap, mindkettő legalább 95%. Statement és branch coverage is
-mérve van, kizárás nélkül. A tesztek a warningokat hibának tekintik. A Flake8 sorlimitje 120.
+mérve van, kizárás nélkül. A tesztek a warningokat hibának tekintik, egy MLflow 3.17.2 által
+importált, a regresszortól független AI-séma konkrét `AnyType` figyelmeztetésének dokumentált
+kivételével. A saját modell signature-jét teszt ellenőrzi. A Flake8 sorlimitje 120.
 A Pyright alapkonfigurációja az assignment szelíd strict kapcsolóit használja; a másik standard.
-A [fázisjelentés](docs/phase-1-results.md) tartalmazza a tényleges eredményeket.
+Az [1. fázis](docs/phase-1-results.md) és a [2. fázis jelentése](docs/phase-2-results.md)
+tartalmazza a tényleges eredményeket.
 
 ## Felépítés és következő fázisok
 
@@ -141,20 +217,25 @@ A [fázisjelentés](docs/phase-1-results.md) tartalmazza a tényleges eredménye
 | `splitting.py` | Paramétervalidáció és időrendi felosztás |
 | `preprocessing.py` | Újrafelhasználható sklearn transzformációk |
 | `prepare.py` | CLI, export és provenance |
+| `modeling.py` | Baseline, Random Forest, metrikák és promóciós feltétel |
+| `training_config.py`, `training_data.py` | Validált konfiguráció és ellenőrzött train/validation adatok |
+| `tracking.py` | MLflow-kísérlet és verzióhoz kötött champion-feloldás |
+| `training.py`, `train_cli.py` | Naplózott tanítás, Registry-promóció és CLI |
 
-A további architektúra egy MLflow Tracking Serverből és Model Registryből, FastAPI alkalmazásból,
-valamint vékony Streamlit/Evidently megjelenítőből áll majd, perzisztens Docker Compose tárolással.
+A további architektúra FastAPI alkalmazással és vékony Streamlit/Evidently megjelenítővel bővül,
+perzisztens Docker Compose tárolással.
 A baseline és challenger ugyanazon validációs adaton mért MAE alapján versenyeznek. A drift
 monitoring külön folyamat, önmagában nem válthat modellt. Airflow a stabil alaprendszer után készül.
 
-Jelenleg nincs ML tanítás, REST API, Compose, monitoring dashboard, pre-commit hook vagy távoli CI.
+Jelenleg nincs saját REST API, Compose, monitoring dashboard, pre-commit hook vagy távoli CI.
 Ezek a későbbi fázisok feladatai, ezért még nem áll rendelkezésre valós UI screenshot sem.
 A végső ZIP és egyoldalas beadási PDF a 6. fázisban készül, a megadott személyes adatokkal.
 
 ## Git munkafolyamat
 
-A projektalapok a `feature/project-foundation`, az adatfeldolgozás a `feature/data-preprocessing`
-branchen készül. A mainre a branch-történetet megőrző `--no-ff` merge-ekkel kerülnek a változások.
+A projektalapok a `feature/project-foundation`, az adatfeldolgozás a `feature/data-preprocessing`,
+a modell-életciklus a `feature/model-training` branchen készül. A mainre a branch-történetet
+megőrző `--no-ff` merge-ekkel kerülnek a változások.
 A fejlesztési lépéseket és tesztjeiket együtt, angol Conventional Commits üzenetekkel rögzítjük.
 
 ```bash
