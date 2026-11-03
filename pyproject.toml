@@ -12,6 +12,7 @@ dynamic = ["dependencies"]
 [project.scripts]
 garments-prepare = "garments_mlops.prepare:main"
 garments-train = "garments_mlops.train_cli:main"
+garments-smoke = "garments_mlops.smoke:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
