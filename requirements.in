@@ -20,3 +20,8 @@ mlflow==3.17.2
 SQLAlchemy==2.0.44
 filelock==4.2.6
 skops==0.16.0
+# REST application, ASGI server and HTTP integration tests.
+fastapi==0.162.0
+pydantic==2.14.2
+uvicorn==0.54.0
+httpx==0.28.1
