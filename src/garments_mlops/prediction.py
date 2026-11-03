@@ -30,10 +30,12 @@ def predict_records(config: TrainingConfig, request: PredictRequest, request_id:
         response = PredictResponse(request_id=request_id, model_version=champion.version,
                                    run_id=run.info.run_id, predictions=values.tolist())
         mlflow.set_tags({"endpoint": "predict", "request_id": request_id,
-                         "model_name": config.model_name, "model_version": champion.version})
-        mlflow.log_dict({"request_id": request_id, "records": records}, "api/request.json")
+                         "model_name": config.model_name, "model_version": champion.version,
+                         "data_source": request.source})
+        mlflow.log_dict({"request_id": request_id, "records": records, "source": request.source}, "api/request.json")
         mlflow.log_dict(response.model_dump(mode="json"), "api/response.json")
-        current = features.assign(prediction=values, request_id=request_id, model_version=champion.version)
+        current = features.assign(prediction=values, request_id=request_id, model_version=champion.version,
+                                  data_source=request.source)
         mlflow.log_text(current.to_csv(index=False), "monitoring/current.csv")
         mlflow.log_metric("record_count", len(records))
     return response

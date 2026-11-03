@@ -54,6 +54,7 @@ class PredictRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     records: Annotated[list[GarmentRecord], Field(min_length=1, max_length=1000)]
+    source: Literal["live", "demo"] = "live"
 
 
 class PredictResponse(BaseModel):

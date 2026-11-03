@@ -43,6 +43,9 @@ def test_invalid_record_fields_are_rejected(record: dict[str, object], field: st
 
 def test_batch_contract_and_limits(record: dict[str, object]) -> None:
     assert len(PredictRequest.model_validate({"records": [record, record]}).records) == 2
+    assert PredictRequest.model_validate({"records": [record]}).source == "live"
+    with pytest.raises(ValidationError):
+        PredictRequest.model_validate({"records": [record], "source": "unknown"})
     for body in [{"records": []}, {"records": [record] * 1001}, {"records": [record], "secret": "ignored"}]:
         with pytest.raises(ValidationError):
             PredictRequest.model_validate(body)
