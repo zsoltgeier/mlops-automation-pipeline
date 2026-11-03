@@ -1,8 +1,9 @@
 """Tracked candidate training with serialized champion-challenger promotion."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from importlib.metadata import version
 from pathlib import Path
+import re
 
 from filelock import FileLock
 import mlflow
@@ -30,15 +31,22 @@ class TrainingResult:
     decision: PromotionDecision
 
 
-def train_candidate(config: TrainingConfig, kind: ModelKind = "random_forest") -> TrainingResult:
+def train_candidate(
+    config: TrainingConfig, kind: ModelKind = "random_forest", *, request_id: str | None = None,
+) -> TrainingResult:
     """Fit on train, compare on validation and change the alias only after successful logging."""
     spec = config.model_spec(kind)
-    data = load_training_data(config.data_dir)
+    if request_id is not None and re.fullmatch(r"[0-9a-f]{32}", request_id) is None:
+        raise ValueError("request_id must be a server-generated hexadecimal UUID")
     config.lock_path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(config.lock_path, timeout=config.lock_timeout):
+        data = load_training_data(config.data_dir)
         client = tracking_client(config)
         experiment = experiment_id(client, config)
         with mlflow.start_run(experiment_id=experiment, run_name=kind, nested=mlflow.active_run() is not None) as run:
+            if request_id is not None:
+                mlflow.set_tags({"request_id": request_id, "endpoint": "train"})
+                mlflow.log_dict({"request_id": request_id, "model": kind}, "api/request.json")
             mlflow.log_params({**asdict(spec), "minimum_improvement": config.minimum_improvement})
             mlflow.set_tags({"primary_metric": "validation_mae",
                              "dataset_source_sha256": data.provenance["source_sha256"]})
@@ -94,7 +102,12 @@ def train_candidate(config: TrainingConfig, kind: ModelKind = "random_forest") -
             for key, value in {"validation_mae": str(metrics["mae"]), "promotion_reason": decision.reason,
                                "validation_sha256": str(data.provenance["validation_sha256"])}.items():
                 client.set_model_version_tag(config.model_name, candidate_version, key, value)
+            selected = candidate_version if decision.promoted or incumbent is None else incumbent.version
+            result = TrainingResult(run.info.run_id, candidate_version, info.model_uri, selected, metrics, decision)
+            if request_id is not None:
+                mlflow.log_dict({"request_id": request_id, "status": "completed", **asdict(result)},
+                                "api/response.json")
             if decision.promoted:
                 client.set_registered_model_alias(config.model_name, "champion", candidate_version)
             active = str(client.get_model_version_by_alias(config.model_name, "champion").version)
-            return TrainingResult(run.info.run_id, candidate_version, info.model_uri, active, metrics, decision)
+            return replace(result, champion_version=active)
