@@ -46,7 +46,15 @@ def experiment_id(client: MlflowClient, config: TrainingConfig) -> str:
     if config.tracking_uri.startswith("sqlite:///"):
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         location = config.artifact_dir.resolve().as_uri()
-    return client.create_experiment(config.experiment_name, artifact_location=location)
+    try:
+        return client.create_experiment(config.experiment_name, artifact_location=location)
+    except MlflowException as error:
+        if error.error_code != "RESOURCE_ALREADY_EXISTS":
+            raise
+        created = client.get_experiment_by_name(config.experiment_name)
+        if created is None or created.lifecycle_stage != "active":
+            raise
+        return created.experiment_id
 
 
 def champion_version(client: MlflowClient, model_name: str) -> ModelVersion | None:
