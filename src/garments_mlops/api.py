@@ -48,6 +48,8 @@ def _error_response(request: Request, error: Exception) -> JSONResponse:
 
 def create_app(config: TrainingConfig | None = None, *, bootstrap: bool | None = None) -> FastAPI:
     """Create an application for one configured Tracking Server and Registry."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    LOGGER.setLevel(logging.INFO)
     if config is None:
         config = load_training_config(Path(os.getenv("MLOPS_TRAINING_CONFIG", "training.yaml")))
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI")

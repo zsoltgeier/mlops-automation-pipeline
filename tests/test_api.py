@@ -95,6 +95,7 @@ def test_validation_logs_and_responses_do_not_echo_unknown_secrets(
         schema = client.get("/openapi.json").json()
         assert {"/train", "/predict", "/health"} <= set(schema["paths"])
     prediction.assert_not_called()
+    assert len(caplog.records) >= 4
     for entry in caplog.records:
         assert json.loads(entry.message)["event"] == "request_completed"
 
