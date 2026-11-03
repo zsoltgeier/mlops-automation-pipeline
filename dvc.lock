@@ -13,8 +13,8 @@ stages:
       size: 1207
     - path: requirements.txt
       hash: md5
-      md5: b3488a7d3896c5d19821ddd5282be993
-      size: 3072
+      md5: 1d02cca74f43ae9d7815cf5b1c3f5b72
+      size: 3094
     - path: src/garments_mlops/data.py
       hash: md5
       md5: b7cbe7d18516b47f4f6b2d8c23d23456
