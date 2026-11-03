@@ -9,6 +9,7 @@ import pytest
 
 os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
+os.environ.setdefault("DO_NOT_TRACK", "1")
 
 
 @pytest.fixture
@@ -40,3 +41,16 @@ def parameters(tmp_path: Path) -> Path:
     path = tmp_path / "params.yaml"
     path.write_text("data:\n  train_fraction: 0.6\n  validation_fraction: 0.2\n  random_seed: 42\n")
     return path
+
+
+@pytest.fixture
+def monitoring_summary() -> object:
+    """A persisted report contract shared by CLI and Streamlit boundary tests."""
+    from garments_mlops.monitoring import MonitoringSummary
+
+    return MonitoringSummary(
+        run_id="report-run", created_at_utc="2026-11-04T00:00:00+00:00", source="live", fingerprint="f" * 64,
+        reference_sha256="a" * 64, current_sha256="b" * 64, reference_rows=711, current_rows=200,
+        prediction_model_versions=["2"], champion_at_report="2", source_runs=[], drift_share=.6,
+        dataset_drift=True, evaluated_columns=15, columns=[],
+    )
