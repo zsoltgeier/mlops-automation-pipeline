@@ -4,8 +4,11 @@ Az elsődleges követelményforrás a [feladatkiírás](assignment.md). A fejles
 [implementációs útmutató](implementation-guidelines.md) hat fázisában halad, fázisonkénti
 ellenőrzéssel. A következő fázis csak külön felhasználói kérésre indul.
 
-Az 1–2. fázis elkészült. A jelenlegi rendszer DVC-adatelőkészítést és MLflow-alapú, tesztelt
-modell-életciklust biztosít; a következő feladat a REST API és a Docker Compose integrációja.
+Az 1–3. fázis elkészült. A jelenlegi rendszer DVC-adatelőkészítést, MLflow-alapú modell-életciklust,
+auditált REST API-t és egyparancsos Docker Compose indulást biztosít. Az API és az MLflow
+perzisztens volume-okat használ; a kezdeti modellt az API automatikusan létrehozza.
+A [3. fázis eredményeit](phase-3-results.md) tesztek és valódi konténeres futások igazolják.
+A következő feladat az Evidently/Streamlit monitoring, külön felhasználói kérésre.
 
 ## Adatok és szakmai döntések
 

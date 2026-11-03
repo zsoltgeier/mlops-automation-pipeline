@@ -2,9 +2,11 @@
 
 from pathlib import Path
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import mlflow.sklearn
 from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import PERMISSION_DENIED, RESOURCE_ALREADY_EXISTS
 import pytest
 from sklearn.pipeline import Pipeline
 
@@ -47,7 +49,7 @@ def test_missing_champion_is_distinct_from_backend_failure(tracking_config: Trai
     with pytest.raises(MissingChampionError):
         load_champion(tracking_config)
     fake = Mock()
-    fake.get_model_version_by_alias.side_effect = MlflowException("denied", error_code="PERMISSION_DENIED")
+    fake.get_model_version_by_alias.side_effect = MlflowException("denied", error_code=PERMISSION_DENIED)
     with pytest.raises(MlflowException, match="denied"):
         champion_version(fake, tracking_config.model_name)
 
@@ -67,3 +69,19 @@ def test_alias_resolution_pins_the_model_uri(tracking_config: TrainingConfig, mo
     loader.return_value = object()
     with pytest.raises(TypeError, match="complete sklearn Pipeline"):
         load_champion(tracking_config)
+
+
+def test_concurrent_experiment_creation_reuses_only_an_active_experiment() -> None:
+    config = TrainingConfig(tracking_uri="http://localhost:5000")
+    fake = Mock()
+    fake.get_experiment_by_name.side_effect = [None, SimpleNamespace(lifecycle_stage="active", experiment_id="new")]
+    fake.create_experiment.side_effect = MlflowException("created concurrently", error_code=RESOURCE_ALREADY_EXISTS)
+    assert experiment_id(fake, config) == "new"
+    for replacement in [None, SimpleNamespace(lifecycle_stage="deleted")]:
+        fake.get_experiment_by_name.side_effect = [None, replacement]
+        with pytest.raises(MlflowException, match="created concurrently"):
+            experiment_id(fake, config)
+    fake.get_experiment_by_name.side_effect = [None]
+    fake.create_experiment.side_effect = MlflowException("denied", error_code=PERMISSION_DENIED)
+    with pytest.raises(MlflowException, match="denied"):
+        experiment_id(fake, config)

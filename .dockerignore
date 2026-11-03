@@ -1,0 +1,13 @@
+**
+!requirements.txt
+!requirements.in
+!pyproject.toml
+!training.yaml
+!params.yaml
+!src/
+!src/**
+!data/
+!data/garments_worker_productivity.csv
+src/**/__pycache__/
+src/**/*.pyc
+src/**/*.egg-info/

@@ -12,6 +12,7 @@ from filelock import FileLock, Timeout
 import mlflow.sklearn as mlflow_sklearn
 from mlflow.models import get_model_info
 from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import PERMISSION_DENIED
 import numpy as np
 import pandas as pd
 import pytest
@@ -133,7 +134,7 @@ def test_backend_failure_cannot_activate_a_candidate(
         error = OSError
     else:
         monkeypatch.setattr(type(client), "set_registered_model_alias",
-                            Mock(side_effect=MlflowException("alias update denied", error_code="PERMISSION_DENIED")))
+                            Mock(side_effect=MlflowException("alias update denied", error_code=PERMISSION_DENIED)))
         error = MlflowException
     with pytest.raises(error):
         train_candidate(training_config, "random_forest")
@@ -167,3 +168,18 @@ print(json.dumps({'prediction': model.predict(features).tolist(), 'code': prepro
     assert "code/garments_mlops/preprocessing.py" in Path(restored["code"]).as_posix()
     features = pd.read_csv(training_config.data_dir / "validation.csv")[RAW_FEATURES]
     assert_allclose(restored["prediction"], load_champion(training_config).model.predict(features))
+
+
+def test_training_request_and_response_are_audited_in_the_model_run(training_config: TrainingConfig) -> None:
+    request_id = "a" * 32
+    result = train_candidate(training_config, "baseline", request_id=request_id)
+    client = tracking_client(training_config)
+    request = json.loads(Path(client.download_artifacts(result.run_id, "api/request.json")).read_text())
+    response = json.loads(Path(client.download_artifacts(result.run_id, "api/response.json")).read_text())
+    assert request == {"request_id": request_id, "model": "baseline"}
+    assert response["status"] == "completed"
+    assert response["run_id"] == result.run_id
+    assert response["champion_version"] == result.champion_version
+    assert client.get_run(result.run_id).data.tags["request_id"] == request_id
+    with pytest.raises(ValueError, match="server-generated"):
+        train_candidate(training_config, request_id="untrusted-header")
