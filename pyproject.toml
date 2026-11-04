@@ -13,6 +13,7 @@ dynamic = ["dependencies"]
 garments-prepare = "garments_mlops.prepare:main"
 garments-train = "garments_mlops.train_cli:main"
 garments-smoke = "garments_mlops.smoke:main"
+garments-monitor = "garments_mlops.monitor_cli:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
@@ -27,6 +28,8 @@ filterwarnings = [
     "error",
     # MLflow imports an unrelated ResponsesAgent Any schema while saving sklearn models.
     "ignore:.*Any type hint is inferred as AnyType.*:UserWarning:mlflow.types.type_hints",
+    # Evidently 0.7.23's legacy assertion helpers still access numpy.core on NumPy 2.x.
+    "ignore:numpy.core is deprecated.*:DeprecationWarning:evidently.legacy.tests.utils",
 ]
 
 [tool.coverage.run]

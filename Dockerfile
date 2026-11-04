@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     MLFLOW_DISABLE_TELEMETRY=true \
     MLFLOW_DISABLE_AGENT_HINT=1 \
+    DO_NOT_TRACK=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
     XDG_CACHE_HOME=/tmp/cache
 
@@ -28,6 +29,6 @@ ENV GIT_PYTHON_REFRESH=quiet \
     MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR=false
 
 USER app
-EXPOSE 8000
+EXPOSE 8000 8501
 
 CMD ["uvicorn", "garments_mlops.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]

@@ -3,8 +3,8 @@
 Az UCI Garment Productivity dataset `actual_productivity` célváltozójának becslése regresszióval.
 A cél reprodukálható adatfeldolgozás és egy automatizált, tesztelt MLOps rendszer felépítése.
 
-Elkészült az **1–3. fázis: adatelőkészítés, MLflow modell-életciklus, REST API és Docker Compose**.
-Evidently/Streamlit, CI és Airflow a későbbi fázisokban készülnek.
+Elkészült az **1–4. fázis: adatelőkészítés, modell-életciklus, REST API, Docker Compose és monitoring**.
+Az Evidently reportokat Streamlit jeleníti meg; CI és Airflow a későbbi fázisokban készülnek.
 
 A teljes terv és a követelmények megfeleltetése a [megvalósítási tervben](docs/implementation-plan.md)
 olvasható. Az elsődleges követelményforrás a [feladatkiírás](docs/assignment.md), a fázisok rendjét
@@ -30,6 +30,8 @@ docker compose up
 Az image automatikusan felépül a rögzített függőségekkel. Az MLflow egészséges állapota után
 az API előállítja a feldolgozott adatokat, és champion hiányában baseline-t és Random Forestet
 tanít. A modell tényleges betöltése után indul a HTTP-kiszolgálás. Az első indulás ezért hosszabb.
+Ezután a dashboard elkészíti a monitoringreportot. Ha nincs naplózott predikció, 200 megjelölt,
+determinista demórekordot küld a valódi API-n keresztül, hogy friss telepítéskor is legyen mit megjeleníteni.
 Háttérben, a healthcheckek eredményét megvárva:
 
 ```bash
@@ -41,9 +43,10 @@ docker compose logs --tail 50 api
 - [Swagger és kipróbálható API](http://127.0.0.1:8000/docs)
 - [Readiness és aktív modellverzió](http://127.0.0.1:8000/health)
 - [MLflow Tracking és Model Registry](http://127.0.0.1:5000)
+- [Streamlit és Evidently monitoring](http://127.0.0.1:8501)
 
 Portütközés esetén az opcionális `.env` fájl az `.env.example` alapján állítható be.
-Alapértelmezésben csak a helyi gépről érhetők el a portok. Mindkét szolgáltatás nem root
+Alapértelmezésben csak a helyi gépről érhetők el a portok. Mindhárom szolgáltatás nem root
 felhasználóval fut, az MLflow egyúttal HTTP-n közvetíti az artifactokat.
 
 | Named volume | Tartalom |
@@ -51,6 +54,8 @@ felhasználóval fut, az MLflow egyúttal HTTP-n közvetíti az artifactokat.
 | `mlflow-state` | SQLite tracking/Registry adatbázis és modell-, kérés-, predikciós artifactok |
 | `api-state` | A tanítás és inicializálás közös zárfájljai |
 | `prepared-data` | Feldolgozott adatok, preprocessing és referencia |
+
+A dashboard a feldolgozott adatokat csak olvasható mountból kapja; a reportokat MLflow-ban tárolja.
 
 A `docker compose stop`, `start` és `down` megőrzi a volume-okat. A `down --volumes` törli
 az adatbázist és modelleket is. Újraindításkor az adatelőkészítés lefut, de meglévő champion
@@ -151,7 +156,7 @@ tisztítást és transzformációt alkalmazza. A `joblib` artifact csak megbízh
 | `train.csv`, `validation.csv`, `test.csv` | Időben elkülönített tisztított adatok |
 | `*_transformed.csv` | Trainen illesztett, numerikus jellemzők és target |
 | `preprocessed.csv` | A beadáshoz előállított teljes transzformált adat, target és `split` |
-| `reference.csv` | Csak a train bemenetei; DVC-verziózott referencia a későbbi drift monitoringhoz |
+| `reference.csv` | Csak a train bemenetei; DVC-verziózott referencia a drift monitoringhoz |
 | `preprocessor.joblib` | Illesztett sklearn pipeline |
 | `metadata.json` | Bemeneti és kimeneti SHA-256 hash-ek, paraméterek, séma, hiányok, splitadatok |
 
@@ -253,6 +258,8 @@ A `team` pozitív egész, a `no_of_style_change` nemnegatív egész; a többi nu
 nemnegatív szám. A tört létszám megengedett, a `wip` elhagyható vagy `null` lehet.
 A részlegneveknél a forrásbeli `sweing` és a környező szóközök normalizálódnak.
 A target és az ismeretlen mezők elutasításra kerülnek.
+A batch opcionális `source` mezője `live` vagy `demo`, alapértelmezése `live`.
+A mesterséges forgalmat `"source":"demo"` értékkel kell megjelölni; a monitoring külön kezeli.
 
 ```bash
 curl --fail-with-body http://127.0.0.1:8000/train \
@@ -274,7 +281,7 @@ MLflow run ugyanazzal az azonosítóval kereshető vissza.
 A train végpont a modell saját runjába menti az `api/request.json` és `api/response.json`
 artifactokat. A predikciók a `garment-productivity-training-requests` kísérlet külön runjaiba
 kerülnek, ugyanilyen JSON artifactokkal és `monitoring/current.csv` fájllal. Utóbbi a validált
-bemeneteket, predikciókat, kérésazonosítót és modellverziót tartalmazza a következő monitoringfázishoz.
+bemeneteket, predikciókat, kérésazonosítót, modellverziót és a forrás jelölését tartalmazza a monitoringhoz.
 Artifactmentési hiba esetén nincs sikeres API-eredmény. A tanítás válasz-artifactját az alias
 átállítása előtt mentjük; a tényleges sikert a befejezett run és az alias igazolja.
 
@@ -304,6 +311,82 @@ Az alapértelmezett helyi rendszer egy API-workert és közös fájlzárat haszn
 tanítókhoz közös koordináció és más adatbázis szükséges. A szolgáltatás helyi fejlesztésre és
 bemutatóra készült, autentikáció nincs beállítva.
 
+## Evidently és Streamlit monitoring
+
+A [dashboard](http://127.0.0.1:8501) a train bemeneteit hasonlítja össze a REST API-n keresztül
+beérkezett, sikeresen naplózott predikciós bemenetekkel. Az automatikus nézet a `live` adatokat
+részesíti előnyben; ezek hiányában a megjelölt demót mutatja. A két forrás külön is kiválasztható,
+nem keveredik egy reportban. A „Riport frissítése” gomb az aktuális ablakot újra ellenőrzi;
+folyamatos háttérütemezés még nincs. A „Demókérések küldése” gomb új, megjelölt batch-et hoz létre.
+
+```mermaid
+flowchart LR
+    DVC["DVC: reference.csv"] --> Monitoring["Evidently elemzés"]
+    API["Predict API"] -->|"validált bemenet és predikció"| Tracking["MLflow"]
+    Tracking -->|"befejezett predikciós runok"| Monitoring
+    Monitoring -->|"HTML, JSON, adatok és hash-ek"| Tracking
+    Tracking --> Dashboard["Streamlit: report és modelladatok"]
+```
+
+A referencia a `data/processed/reference.csv`: kizárólag a train jellemzői, target nélkül.
+A beolvasás ellenőrzi a preprocessing metadata fájlban rögzített SHA-256 hash-t.
+Az aktuális ablak a legutóbbi 50 sikeres predikciós run közül a kiválasztott forrást tartalmazza,
+legfeljebb 5000 sorral, az újabb kérésektől haladva. Egy batch szükség esetén csonkolódik;
+az érintett forrásrunok, eredeti artifact-hash-ek és a felhasznált sorok száma a reportban megmaradnak.
+Sérült vagy a run azonosítóival nem egyező artifactot nem hagy ki csendben a rendszer.
+A korábbi, forrásjelölés nélküli predikciós runokat `live` adatként olvassa.
+
+A stateless tisztítás után 15 modelljellemzőt vizsgálunk: a 9 numerikus és 4 kategorikus bemenetet,
+valamint a dátumból képzett hónapot és napot. A `team` kategorikus. A nyers dátum, kérésazonosító,
+modellverzió, predikció és target nem driftjellemző. Nincs új imputálás vagy illesztés a current adatokon.
+
+Az Evidently `DataDriftPreset` minden oszlophoz Jensen–Shannon-távolságot számol, 0,1-es küszöbbel.
+A dataset jelzése akkor pozitív, ha a vizsgálható oszlopok legalább 50%-a eltérő eloszlású.
+Ezek bemutatóhoz választott, rögzített beállítások; nem validált üzemi riasztási határok.
+A hiányzó értékek aránya külön szerepel. Ha egy oszlop valamelyik oldalon teljesen hiányzik,
+ahhoz nincs eloszlási pontszám; a hiányarány ettől még látható. 100 sornál kisebb current mintánál
+a dashboard külön jelzi az eredmény bizonytalanságát.
+
+Az elemzés az MLflow `garment-productivity-training-monitoring` kísérletébe ment:
+
+| Artifact | Tartalom |
+| --- | --- |
+| `monitoring/report.html` | Interaktív, a dashboardba beágyazott és letölthető Evidently report |
+| `monitoring/report.json` | Natív Evidently metrikák és teszteredmények |
+| `monitoring/summary.json` | Oszloppontszámok, hiányarányok, adat- és modellverziók, forrásrunok, hash-ek |
+| `monitoring/reference.csv`, `monitoring/current.csv` | Az elemzéshez használt két adathalmaz |
+
+A referencia, current ablak, forrásrunok és elemzési beállítások közös fingerprintet kapnak.
+Azonos fingerprinthez a korábbi sikeres reportot használjuk, ezért frissítés vagy újraindítás
+önmagában nem gyárt új reportot. Artifactmentési hiba esetén a run `FAILED` marad.
+Az aktuális championt a dashboard külön kérdezi le, a report pedig rögzíti az elemzéskori aliast
+és a predikciókhoz ténylegesen használt verziókat is. A tanítási táblázat a validációs MAE-t
+és a promóciós döntést mutatja.
+
+Friss telepítéskor a demó 200 train-referenciából mintázott, 42-es seeddel módosított rekord.
+A módosított numerikus értékek szándékosan eltolják az eloszlást. A rekordok a valódi `/predict`
+végponton mennek keresztül, `source=demo` jelöléssel; a dashboard jól látható DEMÓ feliratot mutat.
+A demó nem jelent új tanítást, és nem használja a test adatokat.
+
+Parancssorból, aktivált fejlesztői környezetben, a helyi CLI SQLite-állapotával:
+
+```bash
+garments-monitor --source live
+garments-monitor --source demo
+garments-monitor --demo-if-empty --api-url http://127.0.0.1:8001
+```
+
+A futó Compose rendszerben, annak adataival:
+
+```bash
+docker compose exec dashboard garments-monitor --source live
+docker compose exec dashboard garments-monitor --source demo
+```
+
+A drift kizárólag a bemenetek eloszlásváltozásáról ad információt. Célértékek hiányában nem
+mér MAE-t vagy pontosságromlást. Nem tanít új modellt, és nem ír Registry-aliast;
+a champion–challenger folyamat továbbra is külön validációs adaton dönt a modellcseréről.
+
 ## Minőségellenőrzés
 
 Az aktivált környezetben `make quality`, vagy külön-külön:
@@ -320,12 +403,16 @@ python -m pip check
 
 Az src és a tesztkód külön küszöböt kap, mindkettő legalább 95%. Statement és branch coverage is
 mérve van, kizárás nélkül. A tesztek a warningokat hibának tekintik, egy MLflow 3.17.2 által
-importált, a regresszortól független AI-séma konkrét `AnyType` figyelmeztetésének dokumentált
-kivételével. A saját modell signature-jét teszt ellenőrzi. A Flake8 sorlimitje 120.
+importált, a regresszortól független AI-séma konkrét `AnyType` figyelmeztetésének, illetve az
+Evidently régi teszthelperének konkrét `numpy.core` deprekációjának dokumentált kivételével.
+Az utóbbi csak a külső `evidently.legacy.tests.utils` modulra érvényes. A saját modell
+signature-jét teszt ellenőrzi. A Flake8 sorlimitje 120.
 A Pyright alapkonfigurációja az assignment szelíd strict kapcsolóit használja; a másik standard.
 Az [1. fázis](docs/phase-1-results.md), [2. fázis](docs/phase-2-results.md) és
-[3. fázis jelentése](docs/phase-3-results.md) tartalmazza a tényleges eredményeket.
-A 3. fázis végén 237 teszt sikeres, az src és a tesztkód statement és branch coverage-e 100%.
+[3. fázis](docs/phase-3-results.md) és [4. fázis jelentése](docs/phase-4-results.md)
+tartalmazza a tényleges eredményeket. A 4. fázis végén 263 teszt sikeres;
+az src statement coverage 100%, branch coverage 99,54%, az src együttes coverage 99,92%.
+A tesztkód statement és branch coverage-e 100%.
 
 ## Felépítés és következő fázisok
 
@@ -343,19 +430,23 @@ A 3. fázis végén 237 teszt sikeres, az src és a tesztkód statement és bran
 | `bootstrap.py` | Zárolt adatelőkészítés és kezdeti modell létrehozása |
 | `prediction.py` | Verzióhoz kötött predikció és MLflow-audit |
 | `smoke.py` | Valódi HTTP- és artifact-ellenőrzés, JSON eredményfájl |
+| `monitoring_data.py` | Ellenőrzött referencia és korlátos, külön forrású predikciós ablak |
+| `drift.py`, `monitoring.py` | Evidently elemzés, provenance és MLflow-reportok |
+| `monitor_cli.py` | Report CLI és megjelölt demókérések |
+| `dashboard.py` | Vékony Streamlit megjelenítő |
 
-A további architektúra vékony Streamlit/Evidently megjelenítővel bővül.
 A baseline és challenger ugyanazon validációs adaton mért MAE alapján versenyeznek. A drift
 monitoring külön folyamat, önmagában nem válthat modellt. Airflow a stabil alaprendszer után készül.
 
-Monitoring dashboard, pre-commit hook és távoli CI még nincs. A valós UI screenshotok
+Pre-commit hook és távoli CI még nincs. A végső UI screenshotok
 a 6. fázisban készülnek a végleges rendszerről.
 A végső ZIP és egyoldalas beadási PDF a 6. fázisban készül, a megadott személyes adatokkal.
 
 ## Git munkafolyamat
 
 A projektalapok a `feature/project-foundation`, az adatfeldolgozás a `feature/data-preprocessing`,
-a modell-életciklus a `feature/model-training`, az API és Docker a `feature/rest-api` branchen készül.
+a modell-életciklus a `feature/model-training`, az API és Docker a `feature/rest-api`,
+a monitoring a `feature/drift-monitoring` branchen készül.
 A mainre a branch-történetet
 megőrző `--no-ff` merge-ekkel kerülnek a változások.
 A fejlesztési lépéseket és tesztjeiket együtt, angol Conventional Commits üzenetekkel rögzítjük.

@@ -27,9 +27,12 @@ def prediction_config(tmp_path: Path) -> TrainingConfig:
     return TrainingConfig(tracking_uri=f"sqlite:///{tmp_path / 'tracking.db'}", artifact_dir=tmp_path / "artifacts")
 
 
+@pytest.mark.parametrize("source", ["live", "demo"])
 def test_prediction_audit_is_usable_for_monitoring(
     prediction_request: PredictRequest, prediction_config: TrainingConfig, monkeypatch: pytest.MonkeyPatch,
+    source: str,
 ) -> None:
+    prediction_request = PredictRequest.model_validate({**prediction_request.model_dump(mode="json"), "source": source})
     model = Mock()
     model.predict.return_value = np.array([0.7, 0.8])
     monkeypatch.setattr(prediction, "load_champion", Mock(return_value=Champion("2", model)))
@@ -40,14 +43,17 @@ def test_prediction_audit_is_usable_for_monitoring(
     run = client.get_run(result.run_id)
     assert run.info.status == "FINISHED"
     assert run.data.tags["model_version"] == "2"
+    assert run.data.tags["data_source"] == source
     assert run.data.metrics["record_count"] == 2
     body = json.loads(Path(client.download_artifacts(result.run_id, "api/request.json")).read_text())
     assert body["records"][0]["date"] == "2015-01-01"
+    assert body["source"] == source
     response = json.loads(Path(client.download_artifacts(result.run_id, "api/response.json")).read_text())
     assert response == result.model_dump(mode="json")
     current = pd.read_csv(client.download_artifacts(result.run_id, "monitoring/current.csv"))
     assert current.prediction.tolist() == result.predictions
     assert len(current) == 2
+    assert current.data_source.tolist() == [source, source]
     assert "actual_productivity" not in current
 
 
