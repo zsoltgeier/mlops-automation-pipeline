@@ -4,11 +4,12 @@ Az elsődleges követelményforrás a [feladatkiírás](assignment.md). A fejles
 [implementációs útmutató](implementation-guidelines.md) hat fázisában halad, fázisonkénti
 ellenőrzéssel. A következő fázis csak külön felhasználói kérésre indul.
 
-Az 1–3. fázis elkészült. A jelenlegi rendszer DVC-adatelőkészítést, MLflow-alapú modell-életciklust,
-auditált REST API-t és egyparancsos Docker Compose indulást biztosít. Az API és az MLflow
-perzisztens volume-okat használ; a kezdeti modellt az API automatikusan létrehozza.
-A [3. fázis eredményeit](phase-3-results.md) tesztek és valódi konténeres futások igazolják.
-A következő feladat az Evidently/Streamlit monitoring, külön felhasználói kérésre.
+Az 1–4. fázis elkészült. A rendszer DVC-adatelőkészítést, MLflow modell-életciklust,
+auditált REST API-t, Evidently/Streamlit monitoringot és egyparancsos Docker Compose indulást biztosít.
+A referencia és a naplózott predikciós bemenetek összehasonlítása külön MLflow reportot készít;
+a demóforgalom külön jelölt, a drift nem módosítja a champion modellt.
+A [4. fázis eredményeit](phase-4-results.md) tesztek és valódi konténeres/böngészős futások igazolják.
+A következő feladat a hookok és GitHub Actions CI elkészítése, külön felhasználói kérésre.
 
 ## Adatok és szakmai döntések
 
@@ -27,7 +28,7 @@ A következő feladat az Evidently/Streamlit monitoring, külön felhasználói 
 ## Egyszerű architektúra
 
 Egy Python-csomag a `src/garments_mlops/` alatt. A DVC kezeli az adatokat és az adatfeldolgozó
-pipeline-t. A scikit-learn Pipeline tartalmazza a közös preprocessinget és később a regresszort.
+pipeline-t. A scikit-learn Pipeline tartalmazza a közös preprocessinget és a regresszort.
 MLflow Tracking és Model Registry biztosítja a modell-életciklust. FastAPI szolgálja ki a
 tanítást és predikciót, Streamlit jeleníti meg az Evidently reportokat. Docker Compose indítja
 a szolgáltatásokat perzisztens tárolókkal és healthcheckekkel. Airflow a stabil rendszer után kerülhet be.
