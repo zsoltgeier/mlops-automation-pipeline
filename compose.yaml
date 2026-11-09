@@ -85,7 +85,47 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  airflow:
+    image: garments-airflow:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "1"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__API__WORKERS: "1"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/state/airflow.db
+      MLOPS_API_URL: http://api:8000
+      MLOPS_REFERENCE: /data/reference.csv
+      MLOPS_AIRFLOW_SCHEDULE: ${MLOPS_AIRFLOW_SCHEDULE:-}
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-8080}:8080"
+    volumes:
+      - airflow-state:/opt/airflow/state
+      - prepared-data:/data:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json; from urllib.request import urlopen;
+          h=json.load(urlopen('http://127.0.0.1:8080/api/v2/monitor/health', timeout=3));
+          assert all(h[k]['status']=='healthy' for k in ('metadatabase','scheduler','dag_processor'))
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 180s
+    restart: unless-stopped
+
 volumes:
   mlflow-state:
   api-state:
   prepared-data:
+  airflow-state:

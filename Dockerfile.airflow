@@ -1,0 +1,12 @@
+FROM apache/airflow:3.4.0-python3.11@sha256:be92e15d57c5be726fc39a91cd09cce8f7488483b67979e0fb74c1a2c7cfb4e2
+
+ENV AIRFLOW_HOME=/opt/airflow/state \
+    AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags \
+    PYTHONPATH=/opt/airflow/workflow_client
+
+USER airflow
+RUN mkdir -p /opt/airflow/state /opt/airflow/workflow_client/garments_mlops
+COPY --chown=airflow:root src/garments_mlops/__init__.py src/garments_mlops/feature_schema.py src/garments_mlops/orchestration.py /opt/airflow/workflow_client/garments_mlops/
+COPY --chown=airflow:root dags/ /opt/airflow/dags/
+
+CMD ["standalone"]

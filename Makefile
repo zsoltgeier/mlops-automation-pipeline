@@ -4,7 +4,7 @@ PYRIGHT_PYTHON := $(shell $(PYTHON) -c 'import sys; print(sys.executable)')
 .PHONY: quality test coverage lint typecheck prepare hooks docker-build system-smoke
 
 quality:
-	$(PYTHON) -m flake8 src tests
+	$(PYTHON) -m flake8 src tests dags
 	$(PYTHON) -m pyright --pythonpath "$(PYRIGHT_PYTHON)" --warnings
 	$(PYTHON) -m pyright -p pyright-standard.json --pythonpath "$(PYRIGHT_PYTHON)" --warnings
 	$(PYTHON) -m pytest --cov --cov-report=term-missing --cov-report=xml --junitxml=runtime/test-results.xml
@@ -20,7 +20,7 @@ coverage:
 	$(PYTHON) -m coverage report --include='tests/*' --fail-under=95
 
 lint:
-	$(PYTHON) -m flake8 src tests
+	$(PYTHON) -m flake8 src tests dags
 
 typecheck:
 	$(PYTHON) -m pyright --pythonpath "$(PYRIGHT_PYTHON)" --warnings

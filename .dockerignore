@@ -6,6 +6,8 @@
 !params.yaml
 !src/
 !src/**
+!dags/
+!dags/**
 !data/
 !data/garments_worker_productivity.csv
 src/**/__pycache__/

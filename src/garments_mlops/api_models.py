@@ -73,6 +73,13 @@ class TrainRequest(BaseModel):
     model: ModelKind = "random_forest"
 
 
+class MonitorRequest(BaseModel):
+    """Choose an audit source without exposing storage paths or model policies."""
+
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["live", "demo"] = "live"
+
+
 class TrainResponse(BaseModel):
     """Completed training result with correlation, tracking and Registry identifiers."""
 

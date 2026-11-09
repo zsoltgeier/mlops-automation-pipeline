@@ -18,8 +18,11 @@ from mlflow.exceptions import MlflowException
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.concurrency import run_in_threadpool
 
-from garments_mlops.api_models import HealthResponse, PredictRequest, PredictResponse, TrainRequest, TrainResponse
+from garments_mlops.api_models import (
+    HealthResponse, MonitorRequest, PredictRequest, PredictResponse, TrainRequest, TrainResponse,
+)
 from garments_mlops.bootstrap import initialize_system
+from garments_mlops.monitoring import MonitoringSummary, generate_monitoring
 from garments_mlops.prediction import PredictionOutputError, predict_records
 from garments_mlops.tracking import MissingChampionError, champion_version, tracking_client
 from garments_mlops.training import train_candidate
@@ -80,7 +83,8 @@ def create_app(config: TrainingConfig | None = None, *, bootstrap: bool | None =
             response = _error_response(request, error)
         response.headers["X-Request-ID"] = request.state.request_id
         path = request.url.path
-        endpoint = path if path in {"/train", "/predict", "/health", "/docs", "/openapi.json", "/redoc"} else "other"
+        known = {"/train", "/predict", "/monitor", "/health", "/docs", "/openapi.json", "/redoc"}
+        endpoint = path if path in known else "other"
         LOGGER.info(json.dumps({"event": "request_completed", "request_id": request.state.request_id,
                                 "method": request.method, "endpoint": endpoint, "status_code": response.status_code,
                                 "elapsed_ms": round((perf_counter() - started) * 1000, 3)}))
@@ -109,9 +113,13 @@ def create_app(config: TrainingConfig | None = None, *, bootstrap: bool | None =
         result = train_candidate(replace(settings, lock_timeout=0), payload.model, request_id=request_id)
         return TrainResponse(request_id=request_id, **asdict(result))
 
+    def monitor(payload: MonitorRequest) -> MonitoringSummary:
+        return generate_monitoring(settings, payload.source)
+
     app.middleware("http")(correlate)
     app.exception_handler(RequestValidationError)(invalid_request)
     app.add_api_route("/health", health, methods=["GET"], response_model=HealthResponse)
     app.add_api_route("/predict", predict, methods=["POST"], response_model=PredictResponse)
     app.add_api_route("/train", train, methods=["POST"], response_model=TrainResponse)
+    app.add_api_route("/monitor", monitor, methods=["POST"], response_model=MonitoringSummary)
     return app

@@ -15,6 +15,7 @@ import pytest
 from garments_mlops import api
 from garments_mlops.api_models import PredictResponse
 from garments_mlops.modeling import decide_promotion
+from garments_mlops.monitoring import MonitoringSummary
 from garments_mlops.prediction import PredictionOutputError
 from garments_mlops.prepare import prepare_dataset
 from garments_mlops.tracking import MissingChampionError
@@ -161,3 +162,18 @@ def test_lifespan_initialization_and_environment_flags(
     monkeypatch.setenv("MLOPS_BOOTSTRAP", "typo")
     with pytest.raises(ValueError, match="MLOPS_BOOTSTRAP"):
         api.create_app(http_config)
+
+
+def test_monitor_endpoint_reuses_the_existing_drift_service_and_validates_source(
+    http_config: TrainingConfig, monitoring_summary: MonitoringSummary, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generate = Mock(return_value=monitoring_summary)
+    monkeypatch.setattr(api, "generate_monitoring", generate)
+    with TestClient(api.create_app(http_config, bootstrap=False)) as client:
+        response = client.post("/monitor", json={"source": "demo"})
+        assert response.status_code == 200
+        assert response.json() == monitoring_summary.model_dump(mode="json")
+        assert response.headers["X-Request-ID"]
+        generate.assert_called_once_with(http_config, "demo")
+        assert client.post("/monitor", json={"source": "unknown"}).status_code == 422
+        assert client.post("/monitor", json={"path": "private-path"}).status_code == 422
