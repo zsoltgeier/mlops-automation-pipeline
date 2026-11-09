@@ -14,6 +14,7 @@ garments-prepare = "garments_mlops.prepare:main"
 garments-train = "garments_mlops.train_cli:main"
 garments-smoke = "garments_mlops.smoke:main"
 garments-monitor = "garments_mlops.monitor_cli:main"
+garments-fetch-data = "garments_mlops.fetch_data:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
@@ -48,5 +49,3 @@ reportMissingTypeStubs = false
 reportUnknownMemberType = false
 reportUnknownArgumentType = false
 reportUnknownVariableType = false
-venvPath = ".conda/envs"
-venv = "mlops"

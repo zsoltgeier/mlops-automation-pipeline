@@ -4,12 +4,13 @@ Az elsődleges követelményforrás a [feladatkiírás](assignment.md). A fejles
 [implementációs útmutató](implementation-guidelines.md) hat fázisában halad, fázisonkénti
 ellenőrzéssel. A következő fázis csak külön felhasználói kérésre indul.
 
-Az 1–4. fázis elkészült. A rendszer DVC-adatelőkészítést, MLflow modell-életciklust,
+Az 1–5. fázis elkészült. A rendszer DVC-adatelőkészítést, MLflow modell-életciklust,
 auditált REST API-t, Evidently/Streamlit monitoringot és egyparancsos Docker Compose indulást biztosít.
-A referencia és a naplózott predikciós bemenetek összehasonlítása külön MLflow reportot készít;
-a demóforgalom külön jelölt, a drift nem módosítja a champion modellt.
-A [4. fázis eredményeit](phase-4-results.md) tesztek és valódi konténeres/böngészős futások igazolják.
-A következő feladat a hookok és GitHub Actions CI elkészítése, külön felhasználói kérésre.
+A commit hook a teljes minőségi kaput, a push hook a Docker buildet futtatja. A GitHub Actions
+workflow ugyanezeket és külön, izolált Compose smoke tesztet is definiál.
+Az [5. fázis eredményeit](phase-5-results.md) sikeres tesztek és a kapuk elutasító működésének próbái igazolják.
+Szerveroldali GitHub Actions futás még nem történt; az első push után indul.
+A következő feladat az Airflow, screenshotok és beadási csomag elkészítése, külön felhasználói kérésre.
 
 ## Adatok és szakmai döntések
 
