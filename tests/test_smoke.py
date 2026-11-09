@@ -14,6 +14,7 @@ from garments_mlops.api_models import HealthResponse, PredictResponse, TrainResp
 from garments_mlops.data import RAW_FEATURES
 from garments_mlops.modeling import decide_promotion
 from garments_mlops.system_smoke import MonitoringEvidence
+from garments_mlops.airflow_smoke import AirflowEvidence
 
 
 @pytest.fixture
@@ -128,11 +129,15 @@ def test_cli_option_checks_the_dashboard_and_both_monitoring_sources(
     records.to_csv(source, index=False)
     result = MonitoringEvidence(dashboard_status=200, dashboard_health_status=200, reports=[monitoring_summary])
     check = Mock(return_value=result)
+    workflow = AirflowEvidence(dag_id="garment_productivity", run_id="workflow", state="success", tasks={})
     monkeypatch.setattr(smoke, "exercise_api", Mock(return_value=evidence))
     monkeypatch.setattr(smoke, "verify_audit", Mock())
     monkeypatch.setattr(smoke, "verify_monitoring", check)
+    monkeypatch.setattr(smoke, "verify_airflow", Mock(return_value=workflow))
     smoke.main(["--source", str(source), "--output", str(tmp_path / "smoke.json"),
-                "--mlflow-url", "http://tracking", "--dashboard-url", "http://dashboard"])
+                "--mlflow-url", "http://tracking", "--dashboard-url", "http://dashboard",
+                "--airflow-url", "http://airflow"])
     assert check.call_args.args[0].tracking_uri == "http://tracking"
     assert check.call_args.args[1] == "http://dashboard"
     assert evidence.monitoring == result
+    assert evidence.airflow == workflow

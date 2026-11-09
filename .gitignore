@@ -22,3 +22,7 @@ node_modules/
 runtime/
 mlruns/
 mlartifacts/
+submission/
+submission-info.local.json
+tools/local-evidence/
+docs/final-results.json
