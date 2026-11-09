@@ -4,13 +4,14 @@ Az elsődleges követelményforrás a [feladatkiírás](assignment.md). A fejles
 [implementációs útmutató](implementation-guidelines.md) hat fázisában halad, fázisonkénti
 ellenőrzéssel. A következő fázis csak külön felhasználói kérésre indul.
 
-Az 1–5. fázis elkészült. A rendszer DVC-adatelőkészítést, MLflow modell-életciklust,
-auditált REST API-t, Evidently/Streamlit monitoringot és egyparancsos Docker Compose indulást biztosít.
-A commit hook a teljes minőségi kaput, a push hook a Docker buildet futtatja. A GitHub Actions
-workflow ugyanezeket és külön, izolált Compose smoke tesztet is definiál.
-Az [5. fázis eredményeit](phase-5-results.md) sikeres tesztek és a kapuk elutasító működésének próbái igazolják.
+Az 1–6. fázis helyi megvalósítása és ellenőrzése elkészült. A rendszer DVC-adatelőkészítést,
+MLflow modell-életciklust, auditált REST API-t, Evidently/Streamlit monitoringot és Airflow-feladatláncot
+biztosít, egyparancsos Docker Compose indulással. A commit hook a teljes minőségi kaput,
+a push hook a Docker buildet futtatja. A GitHub Actions workflow ugyanezeket és külön,
+izolált Compose smoke tesztet is definiál. A [6. fázis jelentése](phase-6-results.md),
+a [screenshotok](screenshots/) dokumentálják a végső ellenőrzést.
+A személyes adatokat tartalmazó beadási ZIP helyben elkészült.
 Szerveroldali GitHub Actions futás még nem történt; az első push után indul.
-A következő feladat az Airflow, screenshotok és beadási csomag elkészítése, külön felhasználói kérésre.
 
 ## Adatok és szakmai döntések
 
@@ -32,7 +33,7 @@ Egy Python-csomag a `src/garments_mlops/` alatt. A DVC kezeli az adatokat és az
 pipeline-t. A scikit-learn Pipeline tartalmazza a közös preprocessinget és a regresszort.
 MLflow Tracking és Model Registry biztosítja a modell-életciklust. FastAPI szolgálja ki a
 tanítást és predikciót, Streamlit jeleníti meg az Evidently reportokat. Docker Compose indítja
-a szolgáltatásokat perzisztens tárolókkal és healthcheckekkel. Airflow a stabil rendszer után kerülhet be.
+a négy szolgáltatást perzisztens tárolókkal és healthcheckekkel. Airflow vékony DAG-ja a meglévő API-t hívja.
 
 A champion–challenger összehasonlítás azonos, ismert célértékű validációs adaton dönt promócióról.
 A drift monitoring ettől független; önmagában nem válthat modellt. Nincs külön task queue,
@@ -71,16 +72,15 @@ Kubernetes vagy általános dependency injection keretrendszer.
 | Extra: legalább két feature branch, megőrzött history | 1–6 | Foundation és data branch, majd további funkcionális branchek |
 | Extra: mainre kizárólag merge | 1–6 | `--no-ff` merge-ek, tiszta munkakönyvtár |
 | Extra: Airflow | 6 | Meglévő műveleteket hívó DAG, valós futás és screenshot |
-| Extra: bemutató | 6 | Demó forgatókönyv; a személyes bemutatót a hallgató tartja |
 | Magyar README és AI használat leírása | 1–6 | Telepítés, működés, döntések és korlátok |
 | Valós screenshotok | 6 | MLflow, Registry, REST, Docker, Streamlit/Evidently, Airflow |
-| Előfeldolgozott adat és egyoldalas beadási PDF | 1 és 6 | Numerikus dataset, később beadási csomag |
+| Előfeldolgozott adat és egyoldalas beadási PDF | 1 és 6 | Numerikus dataset és helyi, Gitből kizárt beadási csomag |
 
 ## Korlátok és későbbi beállítások
 
 A helyi DVC remote csak ezen a gépen teszi lehetővé a mentést és visszaállítást. Másik géphez
-közös remote vagy a forrásadatok átadása szükséges. A GitHub push, branch protection, távoli CI
-és személyes bemutató külön beállítást igényelnek. A személyes beadási adatokat nem találjuk ki.
+közös remote vagy a forrásadatok átadása szükséges. A GitHub push, a branch protection és a távoli CI
+külön beállítást igényelnek. A személyes beadási adatokat nem találjuk ki.
 A commitminimumot valódi, több fázison át tartó fejlesztéssel kell elérni.
 
 ## Szakmai háttér

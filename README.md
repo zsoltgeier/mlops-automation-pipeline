@@ -1,533 +1,234 @@
 # Ruházati dolgozók produktivitása – MLOps
 
 Az UCI Garment Productivity dataset `actual_productivity` célváltozójának becslése regresszióval.
-A cél reprodukálható adatfeldolgozás és egy automatizált, tesztelt MLOps rendszer felépítése.
+A rendszer reprodukálható adatfeldolgozást, MLflow modell-életciklust, auditált REST API-t,
+Evidently/Streamlit monitoringot és Airflow-feladatláncot biztosít. Az új modell csak azonos
+validációs adaton mért javulással válthatja le az aktív championt.
 
-Elkészült az **1–5. fázis: adatfeldolgozás, modell-életciklus, API, monitoring és automatizált minőségi kapuk**.
-Az Evidently reportokat Streamlit jeleníti meg. A Git hookok és GitHub Actions workflow elkészültek;
-Airflow és a végső beadási csomag a következő fázis feladatai.
+## Indítás Dockerrel
 
-A teljes terv és a követelmények megfeleltetése a [megvalósítási tervben](docs/implementation-plan.md)
-olvasható. Az elsődleges követelményforrás a [feladatkiírás](docs/assignment.md), a fázisok rendjét
-az [implementációs útmutató](docs/implementation-guidelines.md) tartalmazza.
+Előfeltétel: futó Docker Engine, Compose v2, internet az első buildhez és a
+`data/garments_worker_productivity.csv` nyers adatfájl. WSL-ben a Docker Desktop
+WSL-integrációja legyen bekapcsolva. Conda és előre betanított modell nem szükséges.
+Új klónban a CSV DVC-ből, a kapott forrásadatokból vagy Python 3.11-gyel állítható helyre:
 
-## AI használata
+```bash
+python3 src/garments_mlops/fetch_data.py
+```
 
-Codex segít a követelmények feldolgozásában, a kód, tesztek és dokumentáció elkészítésében.
-A működést tényleges helyi futtatásokkal és automatizált ellenőrzésekkel igazoljuk.
-
-## Gyors indítás Dockerrel
-
-Előfeltétel a futó Docker Engine és Compose v2, valamint az első image buildhez internetkapcsolat.
-WSL esetén a Docker Desktopban az adott disztribúció WSL-integrációja is legyen bekapcsolva.
-A repository gyökerében legyen elérhető a `data/garments_worker_productivity.csv` nyers adatfájl;
-új klónban ezt DVC-ből, a mellékelt forrásadatokból vagy az alább dokumentált UCI-letöltéssel lehet helyreállítani.
-Conda és előre elkészített modell nem szükséges a konténeres induláshoz.
+A letöltő a rögzített SHA-256 hash-t ellenőrzi, eltérő meglévő fájlt nem ír felül.
+Az adatok rendelkezésre állása után a teljes rendszer egy paranccsal indul:
 
 ```bash
 docker compose up
 ```
 
-Az image automatikusan felépül a rögzített függőségekkel. Az MLflow egészséges állapota után
-az API előállítja a feldolgozott adatokat, és champion hiányában baseline-t és Random Forestet
-tanít. A modell tényleges betöltése után indul a HTTP-kiszolgálás. Az első indulás ezért hosszabb.
-Ezután a dashboard elkészíti a monitoringreportot. Ha nincs naplózott predikció, 200 megjelölt,
-determinista demórekordot küld a valódi API-n keresztül, hogy friss telepítéskor is legyen mit megjeleníteni.
-Háttérben, a healthcheckek eredményét megvárva:
+Háttérben, a readiness megvárásával: `docker compose up -d --wait --wait-timeout 300`.
+Ellenőrzés: `docker compose ps`; naplók: `docker compose logs --tail 50 api`.
+Az első induláskor az API előkészíti az adatokat, baseline-t és Random Forestet tanít,
+majd betölti a championt. A dashboard szükség esetén 200 külön jelölt demórekordot küld az API-ra.
 
-```bash
-docker compose up -d --wait
-docker compose ps
-docker compose logs --tail 50 api
-```
-
-- [Swagger és kipróbálható API](http://127.0.0.1:8000/docs)
-- [Readiness és aktív modellverzió](http://127.0.0.1:8000/health)
-- [MLflow Tracking és Model Registry](http://127.0.0.1:5000)
-- [Streamlit és Evidently monitoring](http://127.0.0.1:8501)
-
-Portütközés esetén az opcionális `.env` fájl az `.env.example` alapján állítható be.
-Alapértelmezésben csak a helyi gépről érhetők el a portok. Mindhárom szolgáltatás nem root
-felhasználóval fut, az MLflow egyúttal HTTP-n közvetíti az artifactokat.
-
-| Named volume | Tartalom |
+| Szolgáltatás | Elérés |
 | --- | --- |
-| `mlflow-state` | SQLite tracking/Registry adatbázis és modell-, kérés-, predikciós artifactok |
-| `api-state` | A tanítás és inicializálás közös zárfájljai |
-| `prepared-data` | Feldolgozott adatok, preprocessing és referencia |
+| FastAPI és Swagger | [localhost:8000/docs](http://127.0.0.1:8000/docs), [health](http://127.0.0.1:8000/health) |
+| MLflow Tracking és Model Registry | [localhost:5000](http://127.0.0.1:5000) |
+| Streamlit és Evidently | [localhost:8501](http://127.0.0.1:8501) |
+| Airflow | [localhost:8080](http://127.0.0.1:8080) |
 
-A dashboard a feldolgozott adatokat csak olvasható mountból kapja; a reportokat MLflow-ban tárolja.
+A portok csak loopbacken érhetők el; az opcionális `.env` az [.env.example](.env.example) alapján
+állítható be. Mind a négy szolgáltatás nem root felhasználóval fut. A `mlflow-state`, `api-state`,
+`prepared-data` és `airflow-state` volume-ok tárolják a modelleket, auditokat, zárakat, adatokat
+és DAG-állapotot. A `stop`, `start` és `down` megőrzi ezeket; a `down --volumes` törli őket.
+Meglévő champion mellett az újraindítás nem tanít új modellt. A Docker és a helyi CLI külön állapotot használ.
 
-A `docker compose stop`, `start` és `down` megőrzi a volume-okat. A `down --volumes` törli
-az adatbázist és modelleket is. Újraindításkor az adatelőkészítés lefut, de meglévő champion
-mellett nincs automatikus újratanítás és nem keletkeznek új modellverziók.
-A Docker volume-ok és a gazdagép `runtime/` könyvtára külön állapotot tartalmaznak.
+## Fejlesztői környezet és ellenőrzés
 
-## Fejlesztői környezet
-
-Előfeltételek: Git, Conda, internet a telepítéshez; konténeres ellenőrzéshez Docker és Compose v2.
-A minőségi kapukhoz Make és Node.js is szükséges; a CI Node.js 22-t használ,
-a helyi futtatás Node.js 20.20.0-val is ellenőrzött. A shell scriptek Linux/WSL környezetre készültek.
-A támogatott Python-verzió **3.11.14**. A projekt saját környezetet használ, a Conda base nem módosul.
+Linux/WSL, Git, Conda, Make és Node.js szükséges; a CI Node.js 22-t használ.
+A Python verziója **3.11.14**, a közvetlen és feloldott függőségek a
+[requirements.in](requirements.in) és [requirements.txt](requirements.txt) fájlban rögzítettek.
 
 ```bash
 conda env create --prefix ./.conda/envs/mlops --file environment.yml
 conda activate ./.conda/envs/mlops
 python -m pip install --no-build-isolation --no-deps -e .
-python -m pip check
 garments-fetch-data
 make hooks
+make quality
 ```
 
-A már naprakész környezetnél csak az aktiválás szükséges; megváltozott függőségeknél a
-`python -m pip install -r requirements.txt` parancsot is futtatni kell.
-A VS Code interpreter- és tesztbeállításai
-a repositoryban vannak. A `requirements.in` a közvetlen, a `requirements.txt` az összes feloldott
-függőség pontos verzióját tartalmazza. A pathspec 0.12.1 a DVC scmrepo-kompatibilitása miatt rögzített.
+Frissítés: `python -m pip install -r requirements.txt`. A Linux x86_64 Conda-csomagok pontos
+listája a [conda-linux-64.lock.txt](conda-linux-64.lock.txt) fájlban van; a VS Code beállításai verziózottak.
+A Makefile a projekt interpreterét használja, ha létezik; felülírható:
+`make quality PYTHON=/path/to/python`.
 
-A Linux x86_64 Conda-csomagok pontos visszaállítása alternatív módon:
+| Minőségi kapu | Ellenőrzött eredmény |
+| --- | --- |
+| pytest | 299 sikeres teszt |
+| Src statement / branch coverage | 100% / 99,63%; együttesen 99,93% |
+| Tesztkód statement és branch coverage | 100% |
+| Flake8, 120 karakteres sorlimit | 0 hiba az `src`, `tests`, `dags` alatt |
+| Pyright standard és a kiírás szerinti szelíd strict | Mindkettő 0 hiba, 0 figyelmeztetés az `src` alatt |
+| `pip check` | Hibamentes |
 
-```bash
-conda create --prefix ./.conda/envs/mlops --file conda-linux-64.lock.txt
-conda activate ./.conda/envs/mlops
-python -m pip install -r requirements.txt
-python -m pip install --no-build-isolation --no-deps -e .
-```
+A `make quality` minden kaput futtat, az src és a tesztkód coverage-ét külön, legalább 95%-kal
+követeli meg. Nincs coverage-kizárás; a külső MLflow/Evidently figyelmeztetések szűk, indokolt
+kivételei a [pyproject.toml](pyproject.toml) fájlban vannak. Külön parancsok:
+`make test`, `make coverage`, `make lint`, `make typecheck`, `make docker-build`.
 
-## Dataset és verziókezelés
+A telepített pre-commit hook a teljes minőségi kaput, a pre-push hook a Compose-validációt és
+image buildet futtatja. A [GitHub Actions workflow](.github/workflows/ci.yml) előbb ugyanezt a
+minőségi hookot, majd friss volume-okkal a teljes Docker-rendszertesztet futtatja.
+Az XML-eredményeket és diagnosztikai naplókat 14 napig őrzi meg artifactként.
+A távoli futások az [Actions oldalon](https://github.com/zsoltgeier/mlops-automation-pipeline/actions) követhetők.
+A feature branch-ek története `--no-ff` merge-ekkel marad meg.
+
+## Dataset és reprodukálható preprocessing
 
 Forrás: [UCI Productivity Prediction of Garment Employees](https://archive.ics.uci.edu/dataset/597/productivity+prediction+of+garment+employees),
-[DOI: 10.24432/C51S6D](https://doi.org/10.24432/C51S6D). A mellékelt leírás szerint CC BY 4.0 licencű.
-1197 rekord, 15 oszlop, 59 nap, 2015-01-01 és 2015-03-11 között.
-Az `actual_productivity` regressziós célváltozó. A `wip` 506 helyen hiányzik;
-a 37 darab 1 fölötti célértéket és a tört létszámokat megőrizzük.
+[DOI: 10.24432/C51S6D](https://doi.org/10.24432/C51S6D), CC BY 4.0.
+A dataset 1197 rekordot, 15 oszlopot és 59 napot tartalmaz. A `wip` 506 helyen hiányzik;
+a 37 darab 1 fölötti célérték és a tört létszámok megmaradnak.
 
-A nyers CSV és az eredeti dataset-leíró PDF DVC-verziókezelésben van. Gitbe csak a `.dvc`
-pointerfájlok kerülnek. A kezdeti remote a Gitből kizárt `.dvc-remote/` helyi könyvtár.
+A nyers CSV, a dataset-leíró PDF és a feldolgozott adatok DVC-kezelésben vannak; Gitbe a pointerek,
+a pipeline és a lock kerülnek. A konfigurált remote helyi (`.dvc-remote/`), így másik gépen közös
+remote vagy forrásadat szükséges. A CSV a fenti letöltővel helyreállítható; a leíró PDF-et az nem tölti le.
 
 ```bash
-dvc pull
-dvc push
+make prepare                  # DVC prepare stage, szükség esetén újrafuttatva
 dvc status
+dvc push                      # a konfigurált remote-ba
+dvc pull                      # visszaállítás a hozzáférhető remote-ból
 ```
 
-Új klónba a helyi remote nem érkezik meg: a kapott forrásadatokat be kell másolni, vagy közös,
-hozzáférhető DVC remote-ot kell beállítani. A nyers CSV az eredeti UCI-forrásból is helyreállítható:
+A preprocessing külön CLI-je `garments-prepare`; a paraméterek a [params.yaml](params.yaml) fájlban vannak.
+A tisztítás rendezi a dátumot, a részlegneveket és a duplikációkat, naptári jellemzőket képez,
+és ellenőrzi a sémát. A `team` kategorikus azonosító. Azonos napok mindig egy halmazban maradnak:
+
+| Halmaz | Sorok | Időintervallum |
+| --- | ---: | --- |
+| Train | 711 | 2015-01-01 – 2015-02-10 |
+| Validation | 211 | 2015-02-11 – 2015-02-24 |
+| Test | 275 | 2015-02-25 – 2015-03-11 |
+
+Az imputálás, hiányjelzők, skálázás és OneHotEncoder kizárólag a trainen illeszkedik;
+a target nem kerül bemenetként a preprocessingbe. A test halmaz nem vesz részt modellválasztásban.
+A `data/processed/` tartalmazza a tisztított és transzformált splitfájlokat, az illesztett
+preprocessort, a target nélküli `reference.csv` fájlt és a SHA-256 provenance-ot rögzítő `metadata.json`-t.
+A beadási `preprocessed.csv` 1197 sorból, 37 numerikus jellemzőből, targetből és splitjelölésből áll.
+
+## Tanítás és modellminőség-védelem
+
+A teljes tisztítás, preprocessing és regresszor egy sklearn Pipeline, amelyet MLflow naplóz.
+A baseline `DummyRegressor`; a challenger Random Forest, alapból 100 fával, 8-as mélységgel,
+3-as minimális levélmérettel és 42-es seeddel. A konfiguráció a [training.yaml](training.yaml).
+
+Az első jelölt champion lesz. Később a jelöltet és az aktuális championt ugyanazon validációs
+adaton értékeljük: promócióhoz szigorúan kisebb MAE és legalább `minimum_improvement` abszolút
+javulás kell. Holtversenyben az alias megmarad. Minden jelölt új Registry-verziót kap;
+a döntés, paraméterek, metrikák, dataset-azonosítók, forráshash-ek és artifactok visszakereshetők.
+A tanításokat közös fájlzár sorosítja; tárolási hiba esetén nincs sikeres eredmény.
 
 ```bash
-garments-fetch-data
-```
-
-A letöltés rögzített SHA-256 hash-t ellenőriz. Meglévő, eltérő fájlt nem ír felül; hálózati vagy
-integritási hiba esetén nem hoz létre kész CSV-t. Csak a kiválasztott CSV-t olvassa ki a méretkorlátos ZIP-ből.
-A dataset-leíró PDF-et ez nem tölti le, azt továbbra is a mellékletből vagy DVC-ből kell biztosítani.
-A függőségek telepítése előtt, Python 3.11-gyel is futtatható: `python src/garments_mlops/fetch_data.py`.
-Így a CI sem támaszkodik a fejlesztői gép helyi DVC remote-jára.
-
-A fejlesztői gépen a DVC belső cache helye a lokális,
-Gitből kizárt konfigurációban `.cache/dvc`; más gépen a DVC alapértelmezése használható.
-
-## Reprodukálható adatfeldolgozás
-
-A becslés az adott napi produktivitást magyarázza. A túlóra, ösztönző és leállás időbeli
-rendelkezésre állását napkezdés előtti előrejelzéshez külön tisztázni kellene.
-
-Az aktivált Conda-környezetben:
-
-```bash
-dvc repro
-dvc repro --force --no-run-cache
-dvc push
-```
-
-Csak a CSV-ből induló preprocessinghez a `make prepare` használható. Ez a `prepare` DVC stage-et
-futtatja, és a kiválasztott Python környezet CLI-jét használja az alfolyamatokban is.
-
-A CLI DVC nélkül is futtatható:
-
-```bash
-garments-prepare
-garments-prepare --source data/garments_worker_productivity.csv --output /tmp/garments-check --parameters params.yaml
-```
-
-A `params.yaml` állítja a teljes napokra számított train és validation arányt és az adatelőkészítés
-konfigurációjában rögzített seedet. A felosztás nem véletlen; az azonos napon megfigyelt
-munkacsoportok egy halmazban maradnak. A test adatok nem vehetnek részt modellválasztásban.
-
-| Halmaz | Napok | Sorok | Időintervallum |
-| --- | ---: | ---: | --- |
-| Train | 35 | 711 | 2015-01-01 – 2015-02-10 |
-| Validation | 11 | 211 | 2015-02-11 – 2015-02-24 |
-| Test | 13 | 275 | 2015-02-25 – 2015-03-11 |
-
-A stateless tisztítás rendezi a dátumformátumot, javítja a részlegneveket, eltávolítja a pontos
-duplikációkat és hónap/nap jellemzőket képez. A `team` kategorikus azonosító. Az érvénytelen
-sémát, dátumot, negatív vagy végtelen numerikus értéket és hibás targetet elutasítjuk.
-A numerikus bemenetek hiányozhatnak; a target nem hiányozhat és nem kerülhet a modell bemenetébe.
-
-A sklearn Pipeline kizárólag a train halmazon illeszti a mediánimputálást, hiányjelzőket,
-StandardScalert, kategorikus leggyakoribbérték-imputálást és OneHotEncodert. Ismeretlen kategóriák
-és teljesen hiányzó train oszlopok is kezelhetők. A mentett pipeline predikciókor ugyanazt a
-tisztítást és transzformációt alkalmazza. A `joblib` artifact csak megbízható forrásból tölthető be.
-
-| Fájl a `data/processed/` alatt | Tartalom |
-| --- | --- |
-| `cleaned.csv` | Tisztított megfigyelések, target és `split`; a hiányok a tanulásig megmaradnak |
-| `train.csv`, `validation.csv`, `test.csv` | Időben elkülönített tisztított adatok |
-| `*_transformed.csv` | Trainen illesztett, numerikus jellemzők és target |
-| `preprocessed.csv` | A beadáshoz előállított teljes transzformált adat, target és `split` |
-| `reference.csv` | Csak a train bemenetei; DVC-verziózott referencia a drift monitoringhoz |
-| `preprocessor.joblib` | Illesztett sklearn pipeline |
-| `metadata.json` | Bemeneti és kimeneti SHA-256 hash-ek, paraméterek, séma, hiányok, splitadatok |
-
-A 37 numerikus jellemzőt a train adatok határozzák meg. A `metadata.json` az összes többi kimenet
-hash-ét tartalmazza; a DVC lock rögzíti a kódot, környezetet, konfigurációt és a teljes eredménykönyvtárat.
-
-## Tanítás, MLflow és Model Registry
-
-A tanítás a `train.csv`, `validation.csv` és `metadata.json` fájlokat használja. Ellenőrzi a tartalmi
-hash-eket, a sémát és az időbeli szétválasztást; a végső `test.csv` fájlt nem olvassa be.
-A teljes preprocessing és regresszor egyetlen sklearn Pipeline-ként kerül MLflow-ba.
-
-Az aktivált környezetben, a `dvc repro` után:
-
-```bash
-export MLFLOW_DISABLE_TELEMETRY=true
-export MLFLOW_DISABLE_AGENT_HINT=1
 garments-train --model baseline
-garments-train --model random_forest
-garments-train --model baseline
-```
-
-A baseline `DummyRegressor` a train targetátlagát adja vissza. A challenger Random Forest,
-alapértelmezetten 100 fával, 8-as maximális mélységgel és 3-as minimális levélmérettel.
-A `training.yaml` állítja a tanítás tényleges random seedjét (42), a hiperparamétereket, az
-MLflow backendjét, a kísérlet- és modellneveket, valamint a promóciós küszöböt.
-
-A CLI JSON válasza tartalmazza a run ID-t, az új modellverziót, az aktív champion verzióját,
-a validációs MAE/RMSE/R² értékeket és a döntés indokát. Minden jelölt külön Registry-verziót kap,
-az elutasított modell is visszakereshető marad.
-
-Az első sikeres jelölt automatikusan champion lesz. Később az aktuális championt ugyanazon
-validációs adaton újraértékeljük. Promóció akkor történik, ha a jelölt MAE-je szigorúan kisebb,
-és a javulás legalább `minimum_improvement` nagyságú. A küszöb abszolút MAE-különbség;
-azonos eredmény esetén az alias nem változik.
-
-```bash
 garments-train --model random_forest --minimum-improvement 0.005
-garments-train --config training.yaml --tracking-uri http://127.0.0.1:5000
 ```
 
-A `champion` Registry-alias az aktív verzió hiteles forrása. A `load_champion()` minden híváskor
-feloldja, majd a kiválasztott verziószámhoz kötve tölti be a modellt; nincs újraindítást igénylő cache.
-A közös fájlzár sorosítja a tanításokat és a promóciót. Minden írónak ugyanazt a backend-, modellnév-
-és zárkonfigurációt kell használnia. Az adat-előkészítést a tanítás előtt kell befejezni.
-
-Az MLflow rögzíti a paramétereket, train és validation metrikákat, input dataset-referenciákat,
-teljes forráshash-eket, inputpéldát és modell-signature-t. Artifactként elérhetők a provenance,
-a validációs predikciók és a promóciós döntés. A `promotion_approved` tag a minőségi kapu döntése;
-az aktiválást a tényleges alias és a sikeresen befejezett futás igazolja. Tárolási vagy Registry-hiba
-esetén a futás `FAILED`, és nem tér vissza sikeres tanítási eredmény.
-
-A modelleket `skops` formátumban mentjük, a saját `FeatureCleaner`, a `numpy.dtype` és a saját
-erdő által létrehozott `sklearn.tree._tree.Tree` típusok explicit engedélyezésével. A szükséges
-saját kód a modell artifactjába kerül. A Registry és az artifacttároló csak megbízható forrás lehet.
-
-Az MLflow metadata-adatbázisa `runtime/mlflow.db`, artifactjai a `runtime/artifacts/` alatt vannak.
-Az ismételt futások megőrzik a korábbi kísérleteket és verziókat. A `runtime/` Gitből kizárt,
-ezért klónozáskor nem másolódik át; a modelleket tanítással lehet előállítani. Ez a helyi CLI
-alapértelmezése; a Compose az API-t a külön MLflow szolgáltatáshoz kapcsolja.
-
-A helyi CLI futásaihoz külön UI indítható, a Docker 5000-es portja mellett:
-
-```bash
-mlflow ui --backend-store-uri sqlite:///runtime/mlflow.db --host 127.0.0.1 --port 5001 --workers 1
-```
-
-Elérés: [http://127.0.0.1:5001](http://127.0.0.1:5001). Az Experiments és Models nézetben látszanak
-a futások, artifactok, modellverziók és a champion alias.
-
-Az `MLproject` adatelőkészítő és tanító belépési pontot is tartalmaz. A tanító entrypoint kipróbált futtatása:
-
-```bash
-MLFLOW_TRACKING_URI=sqlite:///runtime/mlflow.db mlflow run . --env-manager=local --experiment-name garment-productivity-training -e train -P model=random_forest
-```
-
-A validációs kapu az automatikus modellcsere minőségét védi. Jövőbeli vagy eltérő eloszlású adatokon
-nem garantál változatlan predikciós teljesítményt. A drift monitoring külön folyamat marad.
+A CLI alapértelmezett SQLite-állapota a Gitből kizárt `runtime/` alatt van.
+A helyi UI: `mlflow ui --backend-store-uri sqlite:///runtime/mlflow.db --host 127.0.0.1 --port 5001 --workers 1`.
+Az [MLproject](MLproject) `prepare` és `train` entrypointot biztosít; például:
+`mlflow run . --env-manager=local -e train -P model=random_forest`.
 
 ## REST API és audit
 
-| Végpont | Bemenet / eredmény |
+| Végpont | Szerződés |
 | --- | --- |
-| `GET /health` | Registry-elérhetőség és champion alias; kész állapotban 200 és modellverzió, egyébként 503 |
-| `POST /predict` | 1–1000 rekord, predikciók, tényleges modellverzió, MLflow run ID és kérésazonosító |
-| `POST /train` | `{"model":"random_forest"}` vagy `{"model":"baseline"}`; a `{}` Random Forestet választ |
-| `GET /docs`, `GET /openapi.json` | Swagger UI és géppel olvasható szerződés |
+| `GET /health` | Readiness és aktív modellverzió |
+| `POST /train` | `{"model":"baseline"}` vagy `{"model":"random_forest"}`; szinkron tanítás és promóciós döntés |
+| `POST /predict` | 1–1000 rekord; predikciók, modellverzió, request ID és MLflow run ID |
+| `POST /monitor` | `{"source":"live"}` vagy `{"source":"demo"}`; mentett driftreport összefoglalója |
+| `GET /docs`, `GET /openapi.json` | Swagger és géppel olvasható API-séma |
 
-Predikciós példa:
+Történeti rekord kipróbálása, demóként megjelölve:
 
 ```bash
 curl --fail-with-body http://127.0.0.1:8000/predict \
-  -H 'Content-Type: application/json' \
-  -d '{"records":[{"date":"2015-01-01","quarter":"Quarter1","department":"sewing","day":"Thursday","team":8,"targeted_productivity":0.8,"smv":26.16,"wip":1108,"over_time":7080,"incentive":98,"idle_time":0,"idle_men":0,"no_of_style_change":0,"no_of_workers":59}]}'
-```
+  -H 'Content-Type: application/json' -d '{
+    "source": "demo",
+    "records": [{
+      "date": "2015-01-01", "quarter": "Quarter1", "department": "sewing",
+      "day": "Thursday", "team": 8, "targeted_productivity": 0.8,
+      "smv": 26.16, "wip": 1108, "over_time": 7080, "incentive": 98,
+      "idle_time": 0, "idle_men": 0, "no_of_style_change": 0, "no_of_workers": 59
+    }]
+  }'
 
-A dátum ISO `YYYY-MM-DD`, a kategóriák megengedett értékei a Swaggerben szerepelnek.
-A `team` pozitív egész, a `no_of_style_change` nemnegatív egész; a többi numerikus mező véges,
-nemnegatív szám. A tört létszám megengedett, a `wip` elhagyható vagy `null` lehet.
-A részlegneveknél a forrásbeli `sweing` és a környező szóközök normalizálódnak.
-A target és az ismeretlen mezők elutasításra kerülnek.
-A batch opcionális `source` mezője `live` vagy `demo`, alapértelmezése `live`.
-A mesterséges forgalmat `"source":"demo"` értékkel kell megjelölni; a monitoring külön kezeli.
-
-```bash
 curl --fail-with-body http://127.0.0.1:8000/train \
   -H 'Content-Type: application/json' -d '{"model":"baseline"}'
 ```
 
-A tanítás szinkron művelet, a válasz csak befejezés után érkezik meg. A szerver konfigurált
-adatait és promóciós feltételét használja, ezeket a kliens nem írhatja felül. A válaszban
-`status`, `request_id`, `run_id`, `model_version`, `model_uri`, `champion_version`, `metrics`
-és `decision` szerepel. Egy gyengébb baseline új verzióként megmarad, de nem cseréli le a championt.
-Minden predikció újra feloldja a champion aliast, majd a konkrét verzióval dolgozik.
+A dátum ISO-formátumú, a numerikus mezők végesek és nemnegatívak, a `team` pozitív egész,
+a `no_of_style_change` nemnegatív egész; a `wip` elhagyható vagy `null`. Az ismeretlen mezők és
+a target elutasításra kerülnek. A kategóriákat a Swagger sorolja fel. A `source` alapértéke `live`.
+Hibás bemenet: 422; foglalt tanítási zár: 409; hiányzó modell/tároló: 503; váratlan belső hiba: 500.
 
-A hibás bemenet 422, egy másik tanítás által foglalt zár 409, a hiányzó modell vagy nem elérhető
-tároló 503 választ ad. Hibás modellkimenet és váratlan belső hiba 500. A hibaválaszok nem
-tartalmaznak backendcímet, hitelesítési adatot vagy nyers elutasított bemenetet.
-Minden kérés szerver által előállított `X-Request-ID` fejlécet kap; a train/predict válasz és
-MLflow run ugyanazzal az azonosítóval kereshető vissza.
+A `champion` alias minden predikciónál újra feloldódik, a kérés konkrét modellverzióhoz kötődik.
+A train/predict kérések és válaszok MLflow `api/request.json`, `api/response.json` artifactokba
+kerülnek. A predikciók `monitoring/current.csv` fájlja tartalmazza a validált bemeneteket és
+a forrásjelölést. Az `X-Request-ID` a HTTP-válaszban, JSON-naplóban és a runban is követhető;
+fejléceket és elutasított payloadokat nem naplózunk. Artifactmentési hiba mellett nincs sikeres API-válasz.
 
-A train végpont a modell saját runjába menti az `api/request.json` és `api/response.json`
-artifactokat. A predikciók a `garment-productivity-training-requests` kísérlet külön runjaiba
-kerülnek, ugyanilyen JSON artifactokkal és `monitoring/current.csv` fájllal. Utóbbi a validált
-bemeneteket, predikciókat, kérésazonosítót, modellverziót és a forrás jelölését tartalmazza a monitoringhoz.
-Artifactmentési hiba esetén nincs sikeres API-eredmény. A tanítás válasz-artifactját az alias
-átállítása előtt mentjük; a tényleges sikert a befejezett run és az alias igazolja.
+## Monitoring és Airflow
 
-Az alkalmazás JSON naplósorokban rögzíti a kérésazonosítót, végpontot, metódust, státuszt és
-futási időt. A fejlécek, query stringek és elutasított payloadok nem kerülnek ezekbe a naplókba.
+Az Evidently a DVC-verziózott train-referenciát hasonlítja a naplózott predikciós bemenetekhez.
+A `live` és `demo` forgalom külön reportba kerül. Az ablak a legutóbbi 50 predikciós runból
+legfeljebb 5000 sor; 15 jellemzőn Jensen–Shannon-távolságot számítunk, 0,1-es oszlopküszöbbel
+és 50%-os dataset-küszöbbel. Ezek szemléltető, nem üzemi riasztási határok.
+A dashboard jelzi a hiányarányokat és a 100 sornál kisebb current minta bizonytalanságát.
 
-Az élő Compose rendszer ellenőrzése az aktivált fejlesztői környezetből:
+A natív `report.html`, `report.json`, `summary.json` és az elemzett adatok MLflow monitoringartifactok.
+Azonos adat és beállítás esetén a report újrafelhasználható. A Streamlit megmutatja a championt,
+a tanítási eredményeket és az interaktív Evidently reportot; frissítés és külön jelölt demó küldése
+is indítható. CLI: `garments-monitor --source demo`; a Compose adataival:
+`docker compose exec dashboard garments-monitor --source demo`.
 
-```bash
-garments-smoke --output runtime/smoke.json
-```
+Az Airflow `garment_productivity` DAG-ja az API-t hívja:
+`train_challenger` → `predict_reference` → `monitor_demo`.
+Random Forest jelöltet tanít, 200 történeti referenciarekordra kér demópredikciót, majd driftreportot ment.
+Alapból a felületről kézzel indítható. Napi ütemezéshez `.env`: `MLOPS_AIRFLOW_SCHEDULE=@daily`,
+majd `docker compose up -d --wait --wait-timeout 300 airflow`.
+Az ütemezés UTC szerinti, catchup és automatikus retry nélkül, egyszerre egy DAG-futással.
+A DAG vékony réteg; az üzleti logika az `src/` alatt van, a feladatválaszok XComban követhetők.
 
-A smoke teszt ellenőrzi a health, Swagger, OpenAPI, predict, train és hibás batch válaszát,
-majd HTTP-n letölti az MLflow artifactokat, és összeveti az API válaszaival. Három rekordra
-predikciót készít és egy baseline jelöltet tanít, így valódi új runokat és modellverziót hoz létre.
-A JSON eredményfájl Gitből kizárt. Eltérő portokhoz `--api-url` és `--mlflow-url` adható meg.
-Az opcionális `--dashboard-url http://127.0.0.1:8501` a Streamlit HTTP-elérését, továbbá a live és
-demo reportok natív HTML/JSON artifactjait, a mentett summaryt, sorszámokat és modellverziókat is ellenőrzi.
-Ehhez a teljes monitoringrendszer és a demóként jelölt forrás is legyen elérhető.
-
-Docker nélküli API a helyi SQLite-konfigurációval, az aktivált környezetben:
-
-```bash
-uvicorn garments_mlops.api:create_app --factory --host 127.0.0.1 --port 8001 --workers 1 --no-access-log
-```
-
-Az `MLOPS_TRAINING_CONFIG` másik YAML-t, az `MLFLOW_TRACKING_URI` másik tracking szervert
-jelölhet ki. Az `MLOPS_BOOTSTRAP=false` kikapcsolja az automatikus előkészítést és kezdeti tanítást.
-Az alapértelmezett helyi rendszer egy API-workert és közös fájlzárat használ. Több gépen futó
-tanítókhoz közös koordináció és más adatbázis szükséges. A szolgáltatás helyi fejlesztésre és
-bemutatóra készült, autentikáció nincs beállítva.
-
-## Evidently és Streamlit monitoring
-
-A [dashboard](http://127.0.0.1:8501) a train bemeneteit hasonlítja össze a REST API-n keresztül
-beérkezett, sikeresen naplózott predikciós bemenetekkel. Az automatikus nézet a `live` adatokat
-részesíti előnyben; ezek hiányában a megjelölt demót mutatja. A két forrás külön is kiválasztható,
-nem keveredik egy reportban. A „Riport frissítése” gomb az aktuális ablakot újra ellenőrzi;
-folyamatos háttérütemezés még nincs. A „Demókérések küldése” gomb új, megjelölt batch-et hoz létre.
-
-```mermaid
-flowchart LR
-    DVC["DVC: reference.csv"] --> Monitoring["Evidently elemzés"]
-    API["Predict API"] -->|"validált bemenet és predikció"| Tracking["MLflow"]
-    Tracking -->|"befejezett predikciós runok"| Monitoring
-    Monitoring -->|"HTML, JSON, adatok és hash-ek"| Tracking
-    Tracking --> Dashboard["Streamlit: report és modelladatok"]
-```
-
-A referencia a `data/processed/reference.csv`: kizárólag a train jellemzői, target nélkül.
-A beolvasás ellenőrzi a preprocessing metadata fájlban rögzített SHA-256 hash-t.
-Az aktuális ablak a legutóbbi 50 sikeres predikciós run közül a kiválasztott forrást tartalmazza,
-legfeljebb 5000 sorral, az újabb kérésektől haladva. Egy batch szükség esetén csonkolódik;
-az érintett forrásrunok, eredeti artifact-hash-ek és a felhasznált sorok száma a reportban megmaradnak.
-Sérült vagy a run azonosítóival nem egyező artifactot nem hagy ki csendben a rendszer.
-A korábbi, forrásjelölés nélküli predikciós runokat `live` adatként olvassa.
-
-A stateless tisztítás után 15 modelljellemzőt vizsgálunk: a 9 numerikus és 4 kategorikus bemenetet,
-valamint a dátumból képzett hónapot és napot. A `team` kategorikus. A nyers dátum, kérésazonosító,
-modellverzió, predikció és target nem driftjellemző. Nincs új imputálás vagy illesztés a current adatokon.
-
-Az Evidently `DataDriftPreset` minden oszlophoz Jensen–Shannon-távolságot számol, 0,1-es küszöbbel.
-A dataset jelzése akkor pozitív, ha a vizsgálható oszlopok legalább 50%-a eltérő eloszlású.
-Ezek bemutatóhoz választott, rögzített beállítások; nem validált üzemi riasztási határok.
-A hiányzó értékek aránya külön szerepel. Ha egy oszlop valamelyik oldalon teljesen hiányzik,
-ahhoz nincs eloszlási pontszám; a hiányarány ettől még látható. 100 sornál kisebb current mintánál
-a dashboard külön jelzi az eredmény bizonytalanságát.
-
-Az elemzés az MLflow `garment-productivity-training-monitoring` kísérletébe ment:
-
-| Artifact | Tartalom |
-| --- | --- |
-| `monitoring/report.html` | Interaktív, a dashboardba beágyazott és letölthető Evidently report |
-| `monitoring/report.json` | Natív Evidently metrikák és teszteredmények |
-| `monitoring/summary.json` | Oszloppontszámok, hiányarányok, adat- és modellverziók, forrásrunok, hash-ek |
-| `monitoring/reference.csv`, `monitoring/current.csv` | Az elemzéshez használt két adathalmaz |
-
-A referencia, current ablak, forrásrunok és elemzési beállítások közös fingerprintet kapnak.
-Azonos fingerprinthez a korábbi sikeres reportot használjuk, ezért frissítés vagy újraindítás
-önmagában nem gyárt új reportot. Artifactmentési hiba esetén a run `FAILED` marad.
-Az aktuális championt a dashboard külön kérdezi le, a report pedig rögzíti az elemzéskori aliast
-és a predikciókhoz ténylegesen használt verziókat is. A tanítási táblázat a validációs MAE-t
-és a promóciós döntést mutatja.
-
-Friss telepítéskor a demó 200 train-referenciából mintázott, 42-es seeddel módosított rekord.
-A módosított numerikus értékek szándékosan eltolják az eloszlást. A rekordok a valódi `/predict`
-végponton mennek keresztül, `source=demo` jelöléssel; a dashboard jól látható DEMÓ feliratot mutat.
-A demó nem jelent új tanítást, és nem használja a test adatokat.
-
-Parancssorból, aktivált fejlesztői környezetben, a helyi CLI SQLite-állapotával:
+A teljes, izolált ellenőrzés: `make system-smoke`. Ez friss volume-okkal épít és indít, ellenőrzi
+az API-t, MLflow artifactokat, Streamlitet, mindkét adatforrást és egy valódi Airflow-futást,
+majd csak a saját konténereit és volume-jait távolítja el. A naplók a `runtime/system-smoke/` alatt maradnak.
+Meglévő rendszeren, új auditált runok létrehozásával:
 
 ```bash
-garments-monitor --source live
-garments-monitor --source demo
-garments-monitor --demo-if-empty --api-url http://127.0.0.1:8001
+garments-smoke --dashboard-url http://127.0.0.1:8501 \
+  --airflow-url http://127.0.0.1:8080 --output runtime/final-smoke.json
 ```
 
-A futó Compose rendszerben, annak adataival:
+## Korlátok, dokumentáció és beadás
 
-```bash
-docker compose exec dashboard garments-monitor --source live
-docker compose exec dashboard garments-monitor --source demo
-```
+A becslés az adott napi produktivitást magyarázza; a napi túlóra és ösztönző miatt napkezdés előtti
+előrejelzésként nem értelmezhető külön rendelkezésreállási vizsgálat nélkül. A validációs kapu
+nem garantál jövőbeli pontosságot. A drift önmagában nem mér pontosságromlást és nem vált modellt.
 
-A drift kizárólag a bemenetek eloszlásváltozásáról ad információt. Célértékek hiányában nem
-mér MAE-t vagy pontosságromlást. Nem tanít új modellt, és nem ír Registry-aliast;
-a champion–challenger folyamat továbbra is külön validációs adaton dönt a modellcseréről.
+A loopback portok, egy API-worker, közös fájlzár, SQLite és az Airflow standalone/LocalExecutor
+konfiguráció helyi futtatásra valók. Az Airflow minden látogatót adminnak tekint; hálózati
+telepítéshez hitelesítés, megfelelő adatbázis és közös koordináció szükséges.
+Az MLflow/Registry és a mentett modellartifactok megbízható forrásból származzanak.
+A nyers adatok és a perzisztens állapot nem érkeznek meg automatikusan egy Git-klónnal.
 
-## Minőségellenőrzés
+A [screenshotok](docs/screenshots/) valódi felületeket és terminálkimenetet mutatnak.
+A részletes döntések és ellenőrzések a [megvalósítási tervben](docs/implementation-plan.md) és a
+[fázisjelentésekben](docs/phase-6-results.md) találhatók; a követelményforrás a [feladatkiírás](docs/assignment.md).
 
-Az aktivált környezetben `make quality`, vagy külön-külön:
+A helyi, Gitből kizárt `submission/` tartalmazza a beadási ZIP-et: előfeldolgozott CSV,
+egyoldalas magyar PDF, hash-manifest és a képek offline másolatai. A PDF-ben szerepelnek a
+megadott személyes adatok, a repository és screenshotok helye, valamint a fontos korlátok.
+A generáló segédek, tesztjeik és kiegészítő függőségeik helyben maradnak. A ZIP-et Moodle-ba kell feltölteni.
 
-```bash
-python -m pytest --cov --cov-report=term-missing --cov-report=xml --junitxml=runtime/test-results.xml
-python -m coverage report --include='src/*' --fail-under=95
-python -m coverage report --include='tests/*' --fail-under=95
-python -m flake8 src tests
-python -m pyright --pythonpath "$(command -v python)" --warnings
-python -m pyright -p pyright-standard.json --pythonpath "$(command -v python)" --warnings
-python -m pip check
-```
-
-Az src és a tesztkód külön küszöböt kap, mindkettő legalább 95%. Statement és branch coverage is
-mérve van, kizárás nélkül. A tesztek a warningokat hibának tekintik, egy MLflow 3.17.2 által
-importált, a regresszortól független AI-séma konkrét `AnyType` figyelmeztetésének, illetve az
-Evidently régi teszthelperének konkrét `numpy.core` deprekációjának dokumentált kivételével.
-Az utóbbi csak a külső `evidently.legacy.tests.utils` modulra érvényes. A saját modell
-signature-jét teszt ellenőrzi. A Flake8 sorlimitje 120.
-A Pyright alapkonfigurációja az assignment szelíd strict kapcsolóit használja; a másik standard.
-Az [1. fázis](docs/phase-1-results.md), [2. fázis](docs/phase-2-results.md),
-[3. fázis](docs/phase-3-results.md), [4. fázis](docs/phase-4-results.md), valamint
-[5. fázis jelentése](docs/phase-5-results.md) tartalmazza a tényleges eredményeket.
-Az 5. fázis végén 281 teszt sikeres; az src statement coverage 100%, branch coverage 99,58%,
-az src együttes coverage 99,93%.
-A tesztkód statement és branch coverage-e 100%.
-
-## Git hookok és CI
-
-Minden klónban külön telepíteni kell a Git hookokat; a konfiguráció verziózott, a `.git/hooks/` nem:
-
-```bash
-make hooks
-```
-
-| Esemény | Automatikus ellenőrzés |
-| --- | --- |
-| `git commit` | Flake8, mindkét Pyright, teljes pytest, külön src/tests coverage-küszöb, `pip check` |
-| `git push` | Docker-elérhetőség, Compose-validáció és image build |
-| GitHub push, pull request vagy kézi workflow-indítás | Ugyanaz a minőségi hook, majd image build és teljes Compose smoke |
-
-A teljes tesztcsomag commitonként körülbelül 1–3 percet igényelhet. A hosszabb, Docker Engine-et
-igénylő build a pre-push hookban fut. A hookok a pontosan rögzített projektfüggőségeket használják;
-nincs külön, eltérő verziókkal telepített lintkörnyezet.
-
-A Makefile a projekt `.conda/envs/mlops` interpreterét használja, ha létezik; egyébként a PATH-ban
-lévő `python`-t. Más környezet explicit kiválasztható: `make quality PYTHON=/path/to/python`.
-A Pyright is ugyanezt az interpretert kapja, ezért a konfiguráció nem kötődik egyetlen helyi venv-útvonalhoz.
-Külön parancsok: `make lint`, `make typecheck`, `make test`, `make coverage`, `make docker-build`.
-
-A [CI workflow](.github/workflows/ci.yml) Ubuntu 24.04-en, Python 3.11.14-gyel fut.
-Az UCI-adatot hash-ellenőrzéssel állítja helyre, majd a rögzített requirements listát telepíti.
-A `quality` job hibája megállítja a folyamatot; a Docker job csak sikeres minőségi kapu után indul.
-A használt GitHub Actionök teljes commitazonosítóval rögzítettek, a token csak repository-olvasási jogot kap.
-A pytest JUnit XML, coverage XML, illetve a build- és szolgáltatásnaplók GitHub artifactként 14 napig megmaradnak.
-
-A teljes, CI-ben is használt konténeres ellenőrzés helyben:
-
-```bash
-make system-smoke
-```
-
-Ez egyedi nevű projektet, üres volume-okat és véletlenszerű hostportokat használ. Felépíti az image-et,
-megvárja a három szolgáltatás readiness állapotát, majd konténerből teszteli a train/predict API-t,
-az MLflow request/response artifactokat, a Streamlitet és a két monitoringforrást.
-Az eredmény és naplók a `runtime/system-smoke/garments-check-*/` alatt maradnak meg.
-A script kilépéskor a saját konténereit és volume-jait eltávolítja; a fejlesztői projekt adatait megőrzi.
-A Docker-parancsok időkorlátosak; takarítási hiba is sikertelen ellenőrzést eredményez.
-A CI job timeoutja végső felső korlát, a runner megszűnésekor annak saját környezete is megszűnik.
-
-A hookok elutasító működését is ellenőriztük külön klónban: lint-/típushibás commit, hibás Docker build,
-valamint külön-külön 95% alatti src és tesztkód coverage mellett is hibával állnak le a megfelelő kapuk.
-GitHub Actions szerveroldali futás még nem történt; az első push után indul automatikusan.
-A branch protection és a kötelező státuszellenőrzések beállítása külön GitHub-művelet.
-
-## Felépítés és következő fázisok
-
-| Modul | Felelősség |
-| --- | --- |
-| `data.py` | Stateless adattisztítás és sémaellenőrzés |
-| `splitting.py` | Paramétervalidáció és időrendi felosztás |
-| `preprocessing.py` | Újrafelhasználható sklearn transzformációk |
-| `prepare.py` | CLI, export és provenance |
-| `fetch_data.py` | Rögzített, hash-ellenőrzött nyers adat helyreállítása UCI-ból |
-| `modeling.py` | Baseline, Random Forest, metrikák és promóciós feltétel |
-| `training_config.py`, `training_data.py` | Validált konfiguráció és ellenőrzött train/validation adatok |
-| `tracking.py` | MLflow-kísérlet és verzióhoz kötött champion-feloldás |
-| `training.py`, `train_cli.py` | Naplózott tanítás, Registry-promóció és CLI |
-| `api_models.py`, `api.py` | Validált HTTP-szerződés, végpontok, korreláció és hibakezelés |
-| `bootstrap.py` | Zárolt adatelőkészítés és kezdeti modell létrehozása |
-| `prediction.py` | Verzióhoz kötött predikció és MLflow-audit |
-| `smoke.py` | Valódi HTTP- és artifact-ellenőrzés, JSON eredményfájl |
-| `system_smoke.py` | Streamlit és mindkét monitoringforrás artifactjainak ellenőrzése |
-| `monitoring_data.py` | Ellenőrzött referencia és korlátos, külön forrású predikciós ablak |
-| `drift.py`, `monitoring.py` | Evidently elemzés, provenance és MLflow-reportok |
-| `monitor_cli.py` | Report CLI és megjelölt demókérések |
-| `dashboard.py` | Vékony Streamlit megjelenítő |
-
-A baseline és challenger ugyanazon validációs adaton mért MAE alapján versenyeznek. A drift
-monitoring külön folyamat, önmagában nem válthat modellt. Airflow a stabil alaprendszer után készül.
-
-A hookok telepítve vannak, a CI workflow definiált, helyi ellenőrzései sikeresek.
-A végső UI screenshotok a 6. fázisban készülnek a végleges rendszerről.
-A végső ZIP és egyoldalas beadási PDF a 6. fázisban készül, a megadott személyes adatokkal.
-
-## Git munkafolyamat
-
-A projektalapok a `feature/project-foundation`, az adatfeldolgozás a `feature/data-preprocessing`,
-a modell-életciklus a `feature/model-training`, az API és Docker a `feature/rest-api`,
-a monitoring a `feature/drift-monitoring`, a minőség és CI a `feature/quality-ci` branchen készül.
-A mainre a branch-történetet
-megőrző `--no-ff` merge-ekkel kerülnek a változások.
-A fejlesztési lépéseket és tesztjeiket együtt, angol Conventional Commits üzenetekkel rögzítjük.
-
-```bash
-git log --graph --decorate --oneline --all
-```
-
-A minimum 50 commit követelmény több fázis tényleges fejlesztésével teljesítendő.
-GitHub push, branch protection, az első távoli CI-futtatás igazolása és a közös DVC remote beállítása még hátravan.
+**AI-használat:** Codex segített a követelmények feldolgozásában, a kód, a tesztek és a dokumentáció
+elkészítésében. Az eredményeket tényleges futtatásokkal és automatizált ellenőrzésekkel igazoltuk.
