@@ -28,3 +28,5 @@ httpx2==2.16.0
 # Drift evaluation and the monitoring presentation layer.
 evidently==0.7.23
 streamlit==1.66.1
+# Reproducible local Git hooks; CI uses the same project checks.
+pre-commit==4.7.0
