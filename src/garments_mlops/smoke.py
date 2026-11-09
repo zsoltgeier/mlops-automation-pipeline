@@ -1,6 +1,7 @@
 """Verify a running API, quality protection and downloadable MLflow audit data."""
 
 import argparse
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -14,6 +15,8 @@ from pydantic import BaseModel
 
 from garments_mlops.api_models import HealthResponse, PredictResponse, TrainResponse
 from garments_mlops.data import RAW_FEATURES
+from garments_mlops.monitor_cli import service_config
+from garments_mlops.system_smoke import MonitoringEvidence, verify_monitoring
 
 
 class SmokeResult(BaseModel):
@@ -26,6 +29,7 @@ class SmokeResult(BaseModel):
     openapi_status: int
     validation_status: int
     checked_at_utc: str | None = None
+    monitoring: MonitoringEvidence | None = None
 
 
 def exercise_api(client: httpx2.Client, records: list[dict[str, object]]) -> SmokeResult:
@@ -82,6 +86,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default="http://127.0.0.1:8000")
     parser.add_argument("--mlflow-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--dashboard-url", help="Also validate Streamlit and live/demo MLflow monitoring reports")
     parser.add_argument("--source", type=Path, default=Path("data/garments_worker_productivity.csv"))
     parser.add_argument("--output", type=Path, default=Path("runtime/smoke.json"))
     args = parser.parse_args(argv)
@@ -91,6 +96,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     with httpx2.Client(base_url=args.api_url, timeout=120, trust_env=False) as client:
         result = exercise_api(client, records)
     verify_audit(args.mlflow_url, result)
+    if args.dashboard_url is not None:
+        config = replace(service_config(), tracking_uri=args.mlflow_url)
+        result.monitoring = verify_monitoring(config, args.dashboard_url)
     result.checked_at_utc = datetime.now(timezone.utc).isoformat()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True)

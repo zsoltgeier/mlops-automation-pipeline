@@ -13,6 +13,7 @@ from garments_mlops import smoke
 from garments_mlops.api_models import HealthResponse, PredictResponse, TrainResponse
 from garments_mlops.data import RAW_FEATURES
 from garments_mlops.modeling import decide_promotion
+from garments_mlops.system_smoke import MonitoringEvidence
 
 
 @pytest.fixture
@@ -117,3 +118,21 @@ def test_cli_exports_valid_sample_records_and_evidence(
     with pytest.raises(SystemExit) as result:
         smoke.main(["--help"])
     assert result.value.code == 0
+
+
+def test_cli_option_checks_the_dashboard_and_both_monitoring_sources(
+    evidence: smoke.SmokeResult, monitoring_summary: object, records: pd.DataFrame, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.csv"
+    records.to_csv(source, index=False)
+    result = MonitoringEvidence(dashboard_status=200, dashboard_health_status=200, reports=[monitoring_summary])
+    check = Mock(return_value=result)
+    monkeypatch.setattr(smoke, "exercise_api", Mock(return_value=evidence))
+    monkeypatch.setattr(smoke, "verify_audit", Mock())
+    monkeypatch.setattr(smoke, "verify_monitoring", check)
+    smoke.main(["--source", str(source), "--output", str(tmp_path / "smoke.json"),
+                "--mlflow-url", "http://tracking", "--dashboard-url", "http://dashboard"])
+    assert check.call_args.args[0].tracking_uri == "http://tracking"
+    assert check.call_args.args[1] == "http://dashboard"
+    assert evidence.monitoring == result
