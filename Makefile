@@ -27,7 +27,7 @@ typecheck:
 	$(PYTHON) -m pyright -p pyright-standard.json --pythonpath "$(PYRIGHT_PYTHON)" --warnings
 
 prepare:
-	$(PYTHON) -m dvc repro
+	PATH="$(dir $(PYRIGHT_PYTHON)):$$PATH" $(PYTHON) -m dvc repro prepare
 
 hooks:
 	PRE_COMMIT_HOME="$(CURDIR)/.cache/pre-commit" $(PYTHON) -m pre_commit install
