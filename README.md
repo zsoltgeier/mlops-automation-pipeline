@@ -3,8 +3,9 @@
 Az UCI Garment Productivity dataset `actual_productivity` célváltozójának becslése regresszióval.
 A cél reprodukálható adatfeldolgozás és egy automatizált, tesztelt MLOps rendszer felépítése.
 
-Elkészült az **1–4. fázis: adatelőkészítés, modell-életciklus, REST API, Docker Compose és monitoring**.
-Az Evidently reportokat Streamlit jeleníti meg; CI és Airflow a későbbi fázisokban készülnek.
+Elkészült az **1–5. fázis: adatfeldolgozás, modell-életciklus, API, monitoring és automatizált minőségi kapuk**.
+Az Evidently reportokat Streamlit jeleníti meg. A Git hookok és GitHub Actions workflow elkészültek;
+Airflow és a végső beadási csomag a következő fázis feladatai.
 
 A teljes terv és a követelmények megfeleltetése a [megvalósítási tervben](docs/implementation-plan.md)
 olvasható. Az elsődleges követelményforrás a [feladatkiírás](docs/assignment.md), a fázisok rendjét
@@ -20,7 +21,7 @@ A működést tényleges helyi futtatásokkal és automatizált ellenőrzésekke
 Előfeltétel a futó Docker Engine és Compose v2, valamint az első image buildhez internetkapcsolat.
 WSL esetén a Docker Desktopban az adott disztribúció WSL-integrációja is legyen bekapcsolva.
 A repository gyökerében legyen elérhető a `data/garments_worker_productivity.csv` nyers adatfájl;
-új klónban ezt DVC-ből vagy a mellékelt forrásadatokból kell helyreállítani.
+új klónban ezt DVC-ből, a mellékelt forrásadatokból vagy az alább dokumentált UCI-letöltéssel lehet helyreállítani.
 Conda és előre elkészített modell nem szükséges a konténeres induláshoz.
 
 ```bash
@@ -65,6 +66,8 @@ A Docker volume-ok és a gazdagép `runtime/` könyvtára külön állapotot tar
 ## Fejlesztői környezet
 
 Előfeltételek: Git, Conda, internet a telepítéshez; konténeres ellenőrzéshez Docker és Compose v2.
+A minőségi kapukhoz Make és Node.js is szükséges; a CI Node.js 22-t használ,
+a helyi futtatás Node.js 20.20.0-val is ellenőrzött. A shell scriptek Linux/WSL környezetre készültek.
 A támogatott Python-verzió **3.11.14**. A projekt saját környezetet használ, a Conda base nem módosul.
 
 ```bash
@@ -72,6 +75,8 @@ conda env create --prefix ./.conda/envs/mlops --file environment.yml
 conda activate ./.conda/envs/mlops
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip check
+garments-fetch-data
+make hooks
 ```
 
 A már naprakész környezetnél csak az aktiválás szükséges; megváltozott függőségeknél a
@@ -107,7 +112,19 @@ dvc status
 ```
 
 Új klónba a helyi remote nem érkezik meg: a kapott forrásadatokat be kell másolni, vagy közös,
-hozzáférhető DVC remote-ot kell beállítani. A fejlesztői gépen a DVC belső cache helye a lokális,
+hozzáférhető DVC remote-ot kell beállítani. A nyers CSV az eredeti UCI-forrásból is helyreállítható:
+
+```bash
+garments-fetch-data
+```
+
+A letöltés rögzített SHA-256 hash-t ellenőriz. Meglévő, eltérő fájlt nem ír felül; hálózati vagy
+integritási hiba esetén nem hoz létre kész CSV-t. Csak a kiválasztott CSV-t olvassa ki a méretkorlátos ZIP-ből.
+A dataset-leíró PDF-et ez nem tölti le, azt továbbra is a mellékletből vagy DVC-ből kell biztosítani.
+A függőségek telepítése előtt, Python 3.11-gyel is futtatható: `python src/garments_mlops/fetch_data.py`.
+Így a CI sem támaszkodik a fejlesztői gép helyi DVC remote-jára.
+
+A fejlesztői gépen a DVC belső cache helye a lokális,
 Gitből kizárt konfigurációban `.cache/dvc`; más gépen a DVC alapértelmezése használható.
 
 ## Reprodukálható adatfeldolgozás
@@ -122,6 +139,9 @@ dvc repro
 dvc repro --force --no-run-cache
 dvc push
 ```
+
+Csak a CSV-ből induló preprocessinghez a `make prepare` használható. Ez a `prepare` DVC stage-et
+futtatja, és a kiválasztott Python környezet CLI-jét használja az alfolyamatokban is.
 
 A CLI DVC nélkül is futtatható:
 
@@ -298,6 +318,9 @@ A smoke teszt ellenőrzi a health, Swagger, OpenAPI, predict, train és hibás b
 majd HTTP-n letölti az MLflow artifactokat, és összeveti az API válaszaival. Három rekordra
 predikciót készít és egy baseline jelöltet tanít, így valódi új runokat és modellverziót hoz létre.
 A JSON eredményfájl Gitből kizárt. Eltérő portokhoz `--api-url` és `--mlflow-url` adható meg.
+Az opcionális `--dashboard-url http://127.0.0.1:8501` a Streamlit HTTP-elérését, továbbá a live és
+demo reportok natív HTML/JSON artifactjait, a mentett summaryt, sorszámokat és modellverziókat is ellenőrzi.
+Ehhez a teljes monitoringrendszer és a demóként jelölt forrás is legyen elérhető.
 
 Docker nélküli API a helyi SQLite-konfigurációval, az aktivált környezetben:
 
@@ -392,12 +415,12 @@ a champion–challenger folyamat továbbra is külön validációs adaton dönt 
 Az aktivált környezetben `make quality`, vagy külön-külön:
 
 ```bash
-python -m pytest --cov --cov-report=term-missing --cov-report=xml
+python -m pytest --cov --cov-report=term-missing --cov-report=xml --junitxml=runtime/test-results.xml
 python -m coverage report --include='src/*' --fail-under=95
 python -m coverage report --include='tests/*' --fail-under=95
 python -m flake8 src tests
-python -m pyright
-python -m pyright -p pyright-standard.json
+python -m pyright --pythonpath "$(command -v python)" --warnings
+python -m pyright -p pyright-standard.json --pythonpath "$(command -v python)" --warnings
 python -m pip check
 ```
 
@@ -408,11 +431,60 @@ Evidently régi teszthelperének konkrét `numpy.core` deprekációjának dokume
 Az utóbbi csak a külső `evidently.legacy.tests.utils` modulra érvényes. A saját modell
 signature-jét teszt ellenőrzi. A Flake8 sorlimitje 120.
 A Pyright alapkonfigurációja az assignment szelíd strict kapcsolóit használja; a másik standard.
-Az [1. fázis](docs/phase-1-results.md), [2. fázis](docs/phase-2-results.md) és
-[3. fázis](docs/phase-3-results.md) és [4. fázis jelentése](docs/phase-4-results.md)
-tartalmazza a tényleges eredményeket. A 4. fázis végén 263 teszt sikeres;
-az src statement coverage 100%, branch coverage 99,54%, az src együttes coverage 99,92%.
+Az [1. fázis](docs/phase-1-results.md), [2. fázis](docs/phase-2-results.md),
+[3. fázis](docs/phase-3-results.md), [4. fázis](docs/phase-4-results.md), valamint
+[5. fázis jelentése](docs/phase-5-results.md) tartalmazza a tényleges eredményeket.
+Az 5. fázis végén 281 teszt sikeres; az src statement coverage 100%, branch coverage 99,58%,
+az src együttes coverage 99,93%.
 A tesztkód statement és branch coverage-e 100%.
+
+## Git hookok és CI
+
+Minden klónban külön telepíteni kell a Git hookokat; a konfiguráció verziózott, a `.git/hooks/` nem:
+
+```bash
+make hooks
+```
+
+| Esemény | Automatikus ellenőrzés |
+| --- | --- |
+| `git commit` | Flake8, mindkét Pyright, teljes pytest, külön src/tests coverage-küszöb, `pip check` |
+| `git push` | Docker-elérhetőség, Compose-validáció és image build |
+| GitHub push, pull request vagy kézi workflow-indítás | Ugyanaz a minőségi hook, majd image build és teljes Compose smoke |
+
+A teljes tesztcsomag commitonként körülbelül 1–3 percet igényelhet. A hosszabb, Docker Engine-et
+igénylő build a pre-push hookban fut. A hookok a pontosan rögzített projektfüggőségeket használják;
+nincs külön, eltérő verziókkal telepített lintkörnyezet.
+
+A Makefile a projekt `.conda/envs/mlops` interpreterét használja, ha létezik; egyébként a PATH-ban
+lévő `python`-t. Más környezet explicit kiválasztható: `make quality PYTHON=/path/to/python`.
+A Pyright is ugyanezt az interpretert kapja, ezért a konfiguráció nem kötődik egyetlen helyi venv-útvonalhoz.
+Külön parancsok: `make lint`, `make typecheck`, `make test`, `make coverage`, `make docker-build`.
+
+A [CI workflow](.github/workflows/ci.yml) Ubuntu 24.04-en, Python 3.11.14-gyel fut.
+Az UCI-adatot hash-ellenőrzéssel állítja helyre, majd a rögzített requirements listát telepíti.
+A `quality` job hibája megállítja a folyamatot; a Docker job csak sikeres minőségi kapu után indul.
+A használt GitHub Actionök teljes commitazonosítóval rögzítettek, a token csak repository-olvasási jogot kap.
+A pytest JUnit XML, coverage XML, illetve a build- és szolgáltatásnaplók GitHub artifactként 14 napig megmaradnak.
+
+A teljes, CI-ben is használt konténeres ellenőrzés helyben:
+
+```bash
+make system-smoke
+```
+
+Ez egyedi nevű projektet, üres volume-okat és véletlenszerű hostportokat használ. Felépíti az image-et,
+megvárja a három szolgáltatás readiness állapotát, majd konténerből teszteli a train/predict API-t,
+az MLflow request/response artifactokat, a Streamlitet és a két monitoringforrást.
+Az eredmény és naplók a `runtime/system-smoke/garments-check-*/` alatt maradnak meg.
+A script kilépéskor a saját konténereit és volume-jait eltávolítja; a fejlesztői projekt adatait megőrzi.
+A Docker-parancsok időkorlátosak; takarítási hiba is sikertelen ellenőrzést eredményez.
+A CI job timeoutja végső felső korlát, a runner megszűnésekor annak saját környezete is megszűnik.
+
+A hookok elutasító működését is ellenőriztük külön klónban: lint-/típushibás commit, hibás Docker build,
+valamint külön-külön 95% alatti src és tesztkód coverage mellett is hibával állnak le a megfelelő kapuk.
+GitHub Actions szerveroldali futás még nem történt; az első push után indul automatikusan.
+A branch protection és a kötelező státuszellenőrzések beállítása külön GitHub-művelet.
 
 ## Felépítés és következő fázisok
 
@@ -422,6 +494,7 @@ A tesztkód statement és branch coverage-e 100%.
 | `splitting.py` | Paramétervalidáció és időrendi felosztás |
 | `preprocessing.py` | Újrafelhasználható sklearn transzformációk |
 | `prepare.py` | CLI, export és provenance |
+| `fetch_data.py` | Rögzített, hash-ellenőrzött nyers adat helyreállítása UCI-ból |
 | `modeling.py` | Baseline, Random Forest, metrikák és promóciós feltétel |
 | `training_config.py`, `training_data.py` | Validált konfiguráció és ellenőrzött train/validation adatok |
 | `tracking.py` | MLflow-kísérlet és verzióhoz kötött champion-feloldás |
@@ -430,6 +503,7 @@ A tesztkód statement és branch coverage-e 100%.
 | `bootstrap.py` | Zárolt adatelőkészítés és kezdeti modell létrehozása |
 | `prediction.py` | Verzióhoz kötött predikció és MLflow-audit |
 | `smoke.py` | Valódi HTTP- és artifact-ellenőrzés, JSON eredményfájl |
+| `system_smoke.py` | Streamlit és mindkét monitoringforrás artifactjainak ellenőrzése |
 | `monitoring_data.py` | Ellenőrzött referencia és korlátos, külön forrású predikciós ablak |
 | `drift.py`, `monitoring.py` | Evidently elemzés, provenance és MLflow-reportok |
 | `monitor_cli.py` | Report CLI és megjelölt demókérések |
@@ -438,15 +512,15 @@ A tesztkód statement és branch coverage-e 100%.
 A baseline és challenger ugyanazon validációs adaton mért MAE alapján versenyeznek. A drift
 monitoring külön folyamat, önmagában nem válthat modellt. Airflow a stabil alaprendszer után készül.
 
-Pre-commit hook és távoli CI még nincs. A végső UI screenshotok
-a 6. fázisban készülnek a végleges rendszerről.
+A hookok telepítve vannak, a CI workflow definiált, helyi ellenőrzései sikeresek.
+A végső UI screenshotok a 6. fázisban készülnek a végleges rendszerről.
 A végső ZIP és egyoldalas beadási PDF a 6. fázisban készül, a megadott személyes adatokkal.
 
 ## Git munkafolyamat
 
 A projektalapok a `feature/project-foundation`, az adatfeldolgozás a `feature/data-preprocessing`,
 a modell-életciklus a `feature/model-training`, az API és Docker a `feature/rest-api`,
-a monitoring a `feature/drift-monitoring` branchen készül.
+a monitoring a `feature/drift-monitoring`, a minőség és CI a `feature/quality-ci` branchen készül.
 A mainre a branch-történetet
 megőrző `--no-ff` merge-ekkel kerülnek a változások.
 A fejlesztési lépéseket és tesztjeiket együtt, angol Conventional Commits üzenetekkel rögzítjük.
@@ -456,4 +530,4 @@ git log --graph --decorate --oneline --all
 ```
 
 A minimum 50 commit követelmény több fázis tényleges fejlesztésével teljesítendő.
-GitHub push, branch protection, távoli CI és a közös DVC remote beállítása még hátravan.
+GitHub push, branch protection, az első távoli CI-futtatás igazolása és a közös DVC remote beállítása még hátravan.
