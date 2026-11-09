@@ -49,5 +49,3 @@ reportMissingTypeStubs = false
 reportUnknownMemberType = false
 reportUnknownArgumentType = false
 reportUnknownVariableType = false
-venvPath = ".conda/envs"
-venv = "mlops"
