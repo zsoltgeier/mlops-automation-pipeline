@@ -17,8 +17,12 @@ stages:
       size: 3956
     - path: src/garments_mlops/data.py
       hash: md5
-      md5: b7cbe7d18516b47f4f6b2d8c23d23456
-      size: 3239
+      md5: 1d1dc006e1f17b72a265c9716ff3ec58
+      size: 3152
+    - path: src/garments_mlops/feature_schema.py
+      hash: md5
+      md5: df75a9643921178ed951489b7944559e
+      size: 452
     - path: src/garments_mlops/prepare.py
       hash: md5
       md5: 4e6520f09a6cd223dd4763b827328760
